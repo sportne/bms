@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme..telemetry">
+  <messageType name="Header" comment="Header message">
+    <field name="version" type="uint8" comment="Protocol version"/>
+  </messageType>
+</schema>

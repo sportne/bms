@@ -2,6 +2,10 @@
 
 Binary Message Schema (BMS) is an XML-based specification language for defining binary wire formats and generating code for serialization and deserialization.
 
+If you are new to compilers: you can think of BMS as a translator.
+It reads an XML spec file, checks it for mistakes, and writes source code in
+Java or C++ that follows the binary format exactly.
+
 ## Project goals
 
 - Define binary message layouts in a machine-readable specification.
@@ -16,9 +20,9 @@ Early-stage compiler / code generator project.
 
 The repository contains:
 - the BMS XML Schema (XSD)
-- example BMS message specifications
+- compiler pipeline foundation (validate → parse → semantic resolve → generate)
 - architecture and semantic-model documentation
-- task lists for an initial Java implementation
+- task lists for incremental milestones
 
 ## Initial scope
 
@@ -28,6 +32,50 @@ The first working version should:
 - generate Java code
 - generate C++ code
 - include tests using example specifications and golden outputs
+
+## CLI
+
+```text
+bms validate <spec.xml>
+bms generate <spec.xml> --java <out/java> [--cpp <out/cpp>]
+```
+
+## How the pipeline works
+
+The current foundation runs these steps in order:
+
+1. Validate XML against the XSD.
+2. Parse XML into a simple parsed model (`schema`, `messageType`, `field`).
+3. Run semantic checks (for example: unknown types, duplicate fields, namespace format).
+4. Build a resolved model that generators can safely use.
+5. Generate Java and/or C++ output files.
+
+This order matters because each step simplifies the next step.
+
+Current parser support is intentionally narrow for foundation v1:
+- root `schema`
+- `messageType`
+- `field`
+
+The spec now requires `schema@namespace` and allows `messageType@namespace` override.
+
+## Namespace behavior (important)
+
+- `schema@namespace` is required.
+- `messageType@namespace` is optional.
+- If `messageType@namespace` is present, it fully overrides the schema namespace.
+- Namespace format is dot-delimited identifiers, for example: `acme.telemetry.v1`.
+- Java generator uses that value directly as the package name.
+- C++ generator converts dots to namespace nesting (`acme::telemetry::v1`).
+
+## Quick start
+
+1. Validate a spec:
+   `./gradlew :app:run --args='validate spec/examples/foundation-valid.xml'`
+2. Generate Java and C++ code:
+   `./gradlew :app:run --args='generate spec/examples/foundation-valid.xml --java /tmp/out-java --cpp /tmp/out-cpp'`
+3. Run checks and tests:
+   `./gradlew check`
 
 ## Non-goals for the first version
 
@@ -39,9 +87,10 @@ The first working version should:
 ## Repository structure
 
 ```text
-spec/     Schema and example message specifications
-src/      Java implementation of parser, semantic model, and generators
+spec/     Schema and specification assets
+app/      Java compiler implementation and tests
 docs/     Architecture, decisions, and development notes
 tasks/    Milestones and actionable implementation tasks
-examples/ Small generated-code usage examples
 ```
+
+Start with [docs/foundation-walkthrough.md](docs/foundation-walkthrough.md) for a beginner-friendly tour.

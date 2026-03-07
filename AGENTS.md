@@ -1,5 +1,7 @@
 # AGENTS.md
 
+This file guides LLM agents working in this repository. Keep it concise.
+
 ## Project
 
 This repository implements tooling for **Binary Message Schema (BMS)**.
@@ -146,6 +148,21 @@ Preferred tests:
 - end-to-end spec → code tests
 
 Generated output must remain stable.
+
+---
+
+# Documentation audience
+
+Documentation inside and outside source files must be understandable by a
+high school senior who is new to this project.
+
+This applies to:
+
+- Markdown files (`README`, `docs/`, `tasks/`)
+- JavaDoc and code comments in source files
+- Error messages shown in CLI output
+
+Prefer plain language, short sentences, and concrete examples over jargon.
 
 ---
 

@@ -92,7 +92,7 @@
 
   <xs:simpleType name="fixedString">
     <xs:restriction base="xs:string">
-      <xs:pattern value="[\x00-\x7F]*"/>
+      <xs:pattern value="[\p{IsBasicLatin}]*"/>
     </xs:restriction>
   </xs:simpleType>
 
@@ -318,6 +318,7 @@
       </xs:choice>
     </xs:sequence>
     <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="namespace" type="xs:string" use="optional"/>
     <xs:attribute name="comment" type="xs:string" use="required"/>
   </xs:complexType>
 
@@ -341,6 +342,7 @@
           <xs:element name="pad" type="pad"/>
         </xs:choice>
       </xs:sequence>
+      <xs:attribute name="namespace" type="xs:string" use="required"/>
     </xs:complexType>
   </xs:element>
 

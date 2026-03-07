@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
+  <messageType name="Header" comment="Header message">
+    <field name="version" type="uint8" comment="Protocol version"/>
+    <field name="sequence" type="uint16" endian="little" comment="Message sequence"/>
+  </messageType>
+
+  <messageType name="Packet" namespace="acme.telemetry.packet" comment="Packet message">
+    <field name="header" type="Header" comment="Nested header"/>
+    <field name="payloadLength" type="uint32" comment="Payload length"/>
+  </messageType>
+</schema>
