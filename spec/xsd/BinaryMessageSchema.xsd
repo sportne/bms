@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/binarymessage"
+           xmlns="http://example.com/binarymessage"
+           elementFormDefault="qualified"
+           attributeFormDefault="unqualified">
+
+  <!-- =================================================== -->
+  <!--  PRIMITIVE INTEGER TYPES                             -->
+  <!-- =================================================== -->
+  <xs:simpleType name="uint8"><xs:restriction base="xs:unsignedByte"/></xs:simpleType>
+  <xs:simpleType name="uint16"><xs:restriction base="xs:unsignedShort"/></xs:simpleType>
+  <xs:simpleType name="uint32"><xs:restriction base="xs:unsignedInt"/></xs:simpleType>
+  <xs:simpleType name="uint64"><xs:restriction base="xs:unsignedLong"/></xs:simpleType>
+
+  <xs:simpleType name="int8"><xs:restriction base="xs:byte"/></xs:simpleType>
+  <xs:simpleType name="int16"><xs:restriction base="xs:short"/></xs:simpleType>
+  <xs:simpleType name="int32"><xs:restriction base="xs:int"/></xs:simpleType>
+  <xs:simpleType name="int64"><xs:restriction base="xs:long"/></xs:simpleType>
+
+  <!-- =================================================== -->
+  <!--  COMMON SUPPORT TYPES                                -->
+  <!-- =================================================== -->
+  <xs:simpleType name="endianType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="little"/>
+      <xs:enumeration value="big"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="encodingType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ascii"/>
+      <xs:enumeration value="utf8"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="algType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="crc16"/>
+      <xs:enumeration value="crc32"/>
+      <xs:enumeration value="crc64"/>
+      <xs:enumeration value="sha256"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="floatEncodingType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ieee754"/>
+      <xs:enumeration value="scaled"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="bitFieldSizeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="u8"/>
+      <xs:enumeration value="u16"/>
+      <xs:enumeration value="u32"/>
+      <xs:enumeration value="u64"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="floatSizeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="f16"/>
+      <xs:enumeration value="f32"/>
+      <xs:enumeration value="f64"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="scaledIntBaseType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="int8"/>
+      <xs:enumeration value="int16"/>
+      <xs:enumeration value="int32"/>
+      <xs:enumeration value="int64"/>
+      <xs:enumeration value="uint8"/>
+      <xs:enumeration value="uint16"/>
+      <xs:enumeration value="uint32"/>
+      <xs:enumeration value="uint64"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- =================================================== -->
+  <!--  FIXED & VARIABLE STRINGS                            -->
+  <!-- =================================================== -->
+  <xs:simpleType name="asciiChar">
+    <xs:restriction base="xs:unsignedByte">
+      <xs:maxInclusive value="127"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="fixedString">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[\x00-\x7F]*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="varString">
+    <xs:sequence>
+      <xs:choice minOccurs="1" maxOccurs="1">
+        <xs:element name="countField">
+          <xs:complexType>
+            <xs:attribute name="ref" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="terminatorValue">
+          <xs:complexType>
+            <xs:attribute name="value" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="encoding" type="encodingType" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  FLOAT & SCALED NUMBERS                              -->
+  <!-- =================================================== -->
+  <xs:complexType name="float">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="size" type="floatSizeType" use="required"/>
+    <xs:attribute name="encoding" type="floatEncodingType" use="required"/>
+    <xs:attribute name="scale" type="xs:decimal" use="optional"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="scaledInt">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="baseType" type="scaledIntBaseType" use="required"/>
+    <xs:attribute name="scale" type="xs:decimal" use="required"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  CHECKSUM & PADDING                                  -->
+  <!-- =================================================== -->
+  <xs:complexType name="checksum">
+    <xs:attribute name="alg" type="algType" use="required"/>
+    <xs:attribute name="range" type="xs:string" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="pad">
+    <xs:attribute name="bytes" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  BIT FIELD                                           -->
+  <!-- =================================================== -->
+  <xs:complexType name="bitField">
+    <xs:sequence>
+      <xs:element name="flag" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:attribute name="name" type="xs:string" use="required"/>
+          <xs:attribute name="position" type="xs:unsignedByte" use="required"/>
+          <xs:attribute name="comment" type="xs:string" use="required"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="segment" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="variant" minOccurs="1" maxOccurs="unbounded">
+              <xs:complexType>
+                <xs:attribute name="name" type="xs:string" use="required"/>
+                <xs:attribute name="value" type="xs:unsignedLong" use="required"/>
+                <xs:attribute name="comment" type="xs:string" use="required"/>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+          <xs:attribute name="name" type="xs:string" use="required"/>
+          <xs:attribute name="from" type="xs:unsignedByte" use="required"/>
+          <xs:attribute name="to" type="xs:unsignedByte" use="required"/>
+          <xs:attribute name="comment" type="xs:string" use="required"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="size" type="bitFieldSizeType" use="required"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  ARRAY / VECTOR / BLOB TYPES                         -->
+  <!-- =================================================== -->
+  <xs:complexType name="array">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="elementType" type="xs:QName" use="required"/>
+    <xs:attribute name="length" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="blobArray">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="length" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="blobVector">
+    <xs:sequence>
+      <xs:choice minOccurs="1" maxOccurs="1">
+        <xs:element name="countField">
+          <xs:complexType>
+            <xs:attribute name="ref" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="terminatorValue">
+          <xs:complexType>
+            <xs:attribute name="value" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  TERMINATOR PATH (recursive)                         -->
+  <!-- =================================================== -->
+  <xs:complexType name="terminatorField">
+    <xs:choice minOccurs="0" maxOccurs="1">
+      <xs:element name="terminatorField" type="terminatorField"/>
+      <xs:element name="terminatorMatch">
+        <xs:complexType>
+          <xs:attribute name="value" type="xs:string" use="required"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:choice>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  VECTOR (variable-length collection)                 -->
+  <!-- =================================================== -->
+  <xs:complexType name="vector">
+    <xs:sequence>
+      <xs:choice minOccurs="1" maxOccurs="1">
+        <xs:element name="countField">
+          <xs:complexType>
+            <xs:attribute name="ref" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="terminatorValue">
+          <xs:complexType>
+            <xs:attribute name="value" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="terminatorField" type="terminatorField"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="elementType" type="xs:QName" use="required"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  FIELD (scalar reference)                            -->
+  <!-- =================================================== -->
+  <xs:complexType name="field">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="type" type="xs:QName" use="required"/>
+    <xs:attribute name="length" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="endian" type="endianType" use="optional"/>
+    <xs:attribute name="fixed" type="xs:string" use="optional"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  CONDITIONAL BLOCK                                   -->
+  <!-- =================================================== -->
+  <xs:complexType name="if">
+    <xs:sequence>
+      <xs:choice minOccurs="1" maxOccurs="unbounded">
+        <xs:element name="field" type="field"/>
+        <xs:element name="bitField" type="bitField"/>
+        <xs:element name="float" type="float"/>
+        <xs:element name="scaledInt" type="scaledInt"/>
+        <xs:element name="array" type="array"/>
+        <xs:element name="vector" type="vector"/>
+        <xs:element name="blobArray" type="blobArray"/>
+        <xs:element name="blobVector" type="blobVector"/>
+        <xs:element name="varString" type="varString"/>
+        <xs:element name="pad" type="pad"/>
+        <xs:element name="checksum" type="checksum"/>
+        <xs:element name="type" type="messageType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="test" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  MESSAGE TYPE                                        -->
+  <!-- =================================================== -->
+  <xs:complexType name="messageType">
+    <xs:sequence>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="field" type="field"/>
+        <xs:element name="bitField" type="bitField"/>
+        <xs:element name="float" type="float"/>
+        <xs:element name="scaledInt" type="scaledInt"/>
+        <xs:element name="array" type="array"/>
+        <xs:element name="vector" type="vector"/>
+        <xs:element name="blobArray" type="blobArray"/>
+        <xs:element name="blobVector" type="blobVector"/>
+        <xs:element name="varString" type="varString"/>
+        <xs:element name="pad" type="pad"/>
+        <xs:element name="checksum" type="checksum"/>
+        <xs:element name="if" type="if"/>
+        <xs:element name="type" type="messageType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="comment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- =================================================== -->
+  <!--  ROOT                                                -->
+  <!-- =================================================== -->
+  <xs:element name="schema">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:choice minOccurs="1" maxOccurs="unbounded">
+          <xs:element name="messageType" type="messageType"/>
+          <xs:element name="bitField" type="bitField"/>
+          <xs:element name="float" type="float"/>
+          <xs:element name="scaledInt" type="scaledInt"/>
+          <xs:element name="array" type="array"/>
+          <xs:element name="vector" type="vector"/>
+          <xs:element name="blobArray" type="blobArray"/>
+          <xs:element name="blobVector" type="blobVector"/>
+          <xs:element name="varString" type="varString"/>
+          <xs:element name="checksum" type="checksum"/>
+          <xs:element name="pad" type="pad"/>
+        </xs:choice>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
