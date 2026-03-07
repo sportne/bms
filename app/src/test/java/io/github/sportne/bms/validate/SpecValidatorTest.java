@@ -12,9 +12,15 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * Contract tests for XSD validation behavior.
+ *
+ * <p>These tests define what the first compiler stage must accept and reject before parsing.
+ */
 class SpecValidatorTest {
   @TempDir Path tempDir;
 
+  /** Contract: the foundation example passes pure XSD validation. */
   @Test
   void validSpecPassesXsdValidation() throws Exception {
     SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
@@ -23,6 +29,7 @@ class SpecValidatorTest {
     assertFalse(Diagnostics.hasErrors(validator.validate(specPath)));
   }
 
+  /** Contract: schema namespace is required by the XSD contract. */
   @Test
   void missingSchemaNamespaceFailsXsdValidation() throws Exception {
     SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
@@ -36,6 +43,7 @@ class SpecValidatorTest {
             .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
   }
 
+  /** Contract: message-level namespace override remains valid against the current XSD. */
   @Test
   void messageNamespaceOverrideRemainsValidAgainstXsd() throws Exception {
     SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
@@ -44,6 +52,16 @@ class SpecValidatorTest {
     validator.validateOrThrow(specPath);
   }
 
+  /** Contract: numeric slice elements are valid at the XSD layer. */
+  @Test
+  void numericSliceSpecPassesXsdValidation() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = TestSupport.resourcePath("specs/numeric-slice-valid.xml");
+
+    validator.validateOrThrow(specPath);
+  }
+
+  /** Contract: missing input files produce an IO diagnostic instead of crashing. */
   @Test
   void validatorReportsIoErrorForMissingSpecPath() throws Exception {
     SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
@@ -55,6 +73,7 @@ class SpecValidatorTest {
             .anyMatch(diagnostic -> diagnostic.code().equals("XSD_IO_ERROR")));
   }
 
+  /** Contract: creating a validator with a missing XSD path fails with a clear diagnostic. */
   @Test
   void fromXsdFailsWhenSchemaPathDoesNotExist() {
     Path missingSchemaPath = tempDir.resolve("missing-schema.xsd");
@@ -67,6 +86,7 @@ class SpecValidatorTest {
             .anyMatch(diagnostic -> diagnostic.code().equals("VALIDATOR_SCHEMA_LOAD_FAILED")));
   }
 
+  /** Contract: malformed XML is surfaced as an XSD-stage diagnostic. */
   @Test
   void malformedXmlProducesXsdDiagnostic() throws Exception {
     SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());

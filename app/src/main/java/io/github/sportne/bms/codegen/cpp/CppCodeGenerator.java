@@ -1,11 +1,14 @@
 package io.github.sportne.bms.codegen.cpp;
 
+import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.MessageTypeRef;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedField;
+import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
 import io.github.sportne.bms.util.DiagnosticSeverity;
@@ -36,6 +39,7 @@ public final class CppCodeGenerator {
           outputDirectory.resolve(messageType.effectiveNamespace().replace('.', '/'));
       Path headerPath = namespaceDirectory.resolve(messageType.name() + ".hpp");
       Path sourcePath = namespaceDirectory.resolve(messageType.name() + ".cpp");
+      ensureSupportedMembers(messageType, sourcePath);
 
       String headerSource = renderHeader(messageType, messageTypeByName);
       String cppSource = renderSource(messageType);
@@ -55,6 +59,48 @@ public final class CppCodeGenerator {
                 -1);
         throw new BmsException("C++ code generation failed.", List.of(diagnostic));
       }
+    }
+  }
+
+  private static void ensureSupportedMembers(ResolvedMessageType messageType, Path sourcePath)
+      throws BmsException {
+    List<Diagnostic> diagnostics = new ArrayList<>();
+    for (ResolvedMessageMember member : messageType.members()) {
+      if (!(member instanceof ResolvedField field)) {
+        diagnostics.add(
+            new Diagnostic(
+                DiagnosticSeverity.ERROR,
+                "GENERATOR_CPP_UNSUPPORTED_MEMBER",
+                "C++ generator does not support message member type "
+                    + member.getClass().getSimpleName()
+                    + " in message "
+                    + messageType.name()
+                    + " yet.",
+                sourcePath.toString(),
+                -1,
+                -1));
+        continue;
+      }
+      if (field.typeRef() instanceof FloatTypeRef || field.typeRef() instanceof ScaledIntTypeRef) {
+        diagnostics.add(
+            new Diagnostic(
+                DiagnosticSeverity.ERROR,
+                "GENERATOR_CPP_UNSUPPORTED_TYPE_REF",
+                "C++ generator does not support field type reference "
+                    + field.typeRef().getClass().getSimpleName()
+                    + " for field "
+                    + field.name()
+                    + " in message "
+                    + messageType.name()
+                    + " yet.",
+                sourcePath.toString(),
+                -1,
+                -1));
+      }
+    }
+
+    if (!diagnostics.isEmpty()) {
+      throw new BmsException("C++ code generation failed due to unsupported members.", diagnostics);
     }
   }
 

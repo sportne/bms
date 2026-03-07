@@ -2,6 +2,11 @@ package io.github.sportne.bms.model.resolved;
 
 import java.util.Arrays;
 
+/**
+ * Built-in scalar integer types supported by the current compiler slice.
+ *
+ * <p>Each enum value stores names for the schema, Java output, and C++ output.
+ */
 public enum PrimitiveType {
   UINT8("uint8", "short", "std::uint8_t"),
   UINT16("uint16", "int", "std::uint16_t"),
@@ -22,18 +27,22 @@ public enum PrimitiveType {
     this.cppTypeName = cppTypeName;
   }
 
+  /** Returns the type name used in BMS XML. */
   public String schemaName() {
     return schemaName;
   }
 
+  /** Returns the Java type name used by the Java generator. */
   public String javaTypeName() {
     return javaTypeName;
   }
 
+  /** Returns the C++ type name used by the C++ generator. */
   public String cppTypeName() {
     return cppTypeName;
   }
 
+  /** Looks up a primitive type by XML schema name, or returns {@code null} when unknown. */
   public static PrimitiveType fromSchemaName(String schemaName) {
     return Arrays.stream(values())
         .filter(primitiveType -> primitiveType.schemaName.equals(schemaName))

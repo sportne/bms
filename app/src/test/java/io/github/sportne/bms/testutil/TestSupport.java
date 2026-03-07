@@ -6,9 +6,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+/** Shared helper methods used by unit tests. */
 public final class TestSupport {
   private TestSupport() {}
 
+  /** Resolves a classpath resource to an absolute path for test usage. */
   public static Path resourcePath(String resourcePath) {
     try {
       var resourceUrl =
@@ -24,6 +26,7 @@ public final class TestSupport {
     }
   }
 
+  /** Reads a classpath resource as UTF-8 text. */
   public static String readResource(String resourcePath) {
     try {
       return Files.readString(resourcePath(resourcePath), StandardCharsets.UTF_8);
@@ -32,6 +35,7 @@ public final class TestSupport {
     }
   }
 
+  /** Finds `spec/xsd/BinaryMessageSchema.xsd` by walking up from the test working directory. */
   public static Path repositoryXsdPath() {
     Path current = Path.of("").toAbsolutePath();
     while (current != null) {

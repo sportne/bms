@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.numeric">
+  <float name="TelemetryFloat" size="f32" encoding="ieee754" comment="Reusable float type"/>
+  <scaledInt name="TemperatureScaled" baseType="int16" scale="0.01" comment="Reusable scaled integer type"/>
+  <bitField size="u16" comment="Reusable status bits">
+    <flag name="ready" position="0" comment="Ready flag"/>
+    <segment name="mode" from="1" to="3" comment="Mode bits">
+      <variant name="idle" value="0" comment="Idle mode"/>
+      <variant name="active" value="1" comment="Active mode"/>
+    </segment>
+  </bitField>
+
+  <messageType name="TelemetryFrame" comment="Telemetry frame">
+    <field name="version" type="uint8" comment="Protocol version"/>
+    <bitField size="u8" comment="Inline status bits">
+      <flag name="alarm" position="0" comment="Alarm flag"/>
+      <segment name="state" from="1" to="2" comment="State bits">
+        <variant name="off" value="0" comment="Off"/>
+        <variant name="on" value="1" comment="On"/>
+      </segment>
+    </bitField>
+    <float
+        name="temperature"
+        size="f32"
+        encoding="scaled"
+        scale="0.1"
+        endian="little"
+        comment="Scaled temperature"/>
+    <scaledInt
+        name="voltage"
+        baseType="uint16"
+        scale="0.01"
+        endian="big"
+        comment="Voltage reading"/>
+    <field
+        name="reusableTemperature"
+        type="TemperatureScaled"
+        comment="Reusable scaled integer field"/>
+    <field name="reusableFloat" type="TelemetryFloat" comment="Reusable float field"/>
+  </messageType>
+</schema>

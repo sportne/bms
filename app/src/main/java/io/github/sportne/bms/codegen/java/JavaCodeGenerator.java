@@ -1,13 +1,16 @@
 package io.github.sportne.bms.codegen.java;
 
 import io.github.sportne.bms.model.Endian;
+import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.MessageTypeRef;
 import io.github.sportne.bms.model.resolved.PrimitiveType;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedField;
+import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
 import io.github.sportne.bms.util.DiagnosticSeverity;
@@ -38,6 +41,7 @@ public final class JavaCodeGenerator {
       Path packageDirectory =
           outputDirectory.resolve(messageType.effectiveNamespace().replace('.', '/'));
       Path outputPath = packageDirectory.resolve(messageType.name() + ".java");
+      ensureSupportedMembers(messageType, outputPath);
       String source = renderMessageType(messageType, messageTypeByName);
       try {
         Files.createDirectories(packageDirectory);
@@ -53,6 +57,50 @@ public final class JavaCodeGenerator {
                 -1);
         throw new BmsException("Java code generation failed.", List.of(diagnostic));
       }
+    }
+  }
+
+  private static void ensureSupportedMembers(ResolvedMessageType messageType, Path outputPath)
+      throws BmsException {
+    List<Diagnostic> diagnostics = new java.util.ArrayList<>();
+    for (ResolvedMessageMember member : messageType.members()) {
+      if (!(member instanceof ResolvedField field)) {
+        diagnostics.add(
+            new Diagnostic(
+                DiagnosticSeverity.ERROR,
+                "GENERATOR_JAVA_UNSUPPORTED_MEMBER",
+                "Java generator does not support message member type "
+                    + member.getClass().getSimpleName()
+                    + " in message "
+                    + messageType.name()
+                    + " yet.",
+                outputPath.toString(),
+                -1,
+                -1));
+        continue;
+      }
+
+      if (field.typeRef() instanceof FloatTypeRef || field.typeRef() instanceof ScaledIntTypeRef) {
+        diagnostics.add(
+            new Diagnostic(
+                DiagnosticSeverity.ERROR,
+                "GENERATOR_JAVA_UNSUPPORTED_TYPE_REF",
+                "Java generator does not support field type reference "
+                    + field.typeRef().getClass().getSimpleName()
+                    + " for field "
+                    + field.name()
+                    + " in message "
+                    + messageType.name()
+                    + " yet.",
+                outputPath.toString(),
+                -1,
+                -1));
+      }
+    }
+
+    if (!diagnostics.isEmpty()) {
+      throw new BmsException(
+          "Java code generation failed due to unsupported members.", diagnostics);
     }
   }
 

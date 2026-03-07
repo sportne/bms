@@ -12,11 +12,23 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * Contract tests for CLI behavior.
+ *
+ * <p>These tests focus on user-visible rules:
+ *
+ * <ul>
+ *   <li>which exit code is returned
+ *   <li>whether output is sent to stdout or stderr
+ *   <li>whether expected files are generated
+ * </ul>
+ */
 class BmsCliTest {
 
   @TempDir Path tempDir;
 
   @Test
+  /** Contract: `validate` succeeds for a known-good foundation spec. */
   void validateCommandReturnsSuccessForValidSpec() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -36,6 +48,27 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` also succeeds for the current numeric front-end slice. */
+  void validateCommandReturnsSuccessForNumericSliceSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate", TestSupport.resourcePath("specs/numeric-slice-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -54,6 +87,34 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: generation fails fast for members not implemented by the Java backend yet. */
+  void generateCommandReturnsSpecErrorForUnsupportedNumericMembers() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/numeric-slice-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  @Test
+  /** Contract: `generate` writes deterministic Java and C++ outputs for the foundation spec. */
   void generateCommandProducesJavaAndCppOutput() throws Exception {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -85,6 +146,7 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: running the CLI with no arguments is a usage error (exit code 2). */
   void noArgsReturnsUsageError() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -101,6 +163,7 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: unknown commands are reported as usage errors. */
   void unknownCommandReturnsUsageError() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -117,6 +180,7 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: unknown options for `generate` are reported as usage errors. */
   void generateCommandReturnsUsageErrorForUnknownOption() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -138,6 +202,7 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` requires exactly one spec path. */
   void validateCommandReturnsUsageErrorWhenSpecIsMissing() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -154,6 +219,7 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `generate` options that need a value fail when that value is missing. */
   void generateCommandReturnsUsageErrorWhenOptionValueIsMissing() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();

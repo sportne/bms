@@ -1,6 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
-  <bitField size="u8" comment="status bits">
-    <flag name="ready" position="0" comment="ready flag"/>
-  </bitField>
+  <array name="samples" elementType="uint8" length="4" comment="Unsupported in parser slice"/>
 </schema>

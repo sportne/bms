@@ -1,20 +1,21 @@
 # Backlog
 
 ## P0
-- [ ] Stabilize XSD.
-- [ ] End-to-end parse of the example spec.
-- [ ] Generate compilable Java for the example spec.
-- [ ] Generate compilable C++ for the example spec.
-- [ ] Add golden output tests.
+
+- [ ] Add parser + semantic support for collection/string/checksum constructs (`array`, `vector`, `varString`, `blobArray`, `blobVector`, `if`, `checksum`, `pad`).
+- [ ] Implement Java backend emission for `bitField`, `float`, and `scaledInt`.
+- [ ] Implement C++ backend emission for `bitField`, `float`, and `scaledInt`.
+- [ ] Expand end-to-end specs so at least one example covers each supported front-end construct.
 
 ## P1
-- [ ] Round-trip binary tests.
-- [ ] Better CLI UX.
-- [ ] Better diagnostics with line/column reporting.
-- [ ] Add formatter for generated Java.
-- [ ] Add formatter for generated C++.
+
+- [ ] Add golden tests for new backend numeric code generation outputs.
+- [ ] Improve diagnostics with richer source location details (line/column where possible).
+- [ ] Improve CLI UX for multi-error summaries and next-step hints.
+- [ ] Add optional formatting pass for generated Java and C++ output.
 
 ## P2
+
 - [ ] Add Python generator.
 - [ ] Add Rust generator.
 - [ ] Add HTML documentation generation from BMS specs.

@@ -23,6 +23,7 @@ public record Diagnostic(
     sourcePath = sourcePath == null ? "" : sourcePath;
   }
 
+  /** Returns {@code true} when both line and column are known. */
   public boolean hasLocation() {
     return line > 0 && column > 0;
   }
