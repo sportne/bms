@@ -1,0 +1,30 @@
+plugins {
+	id 'base'
+	id 'com.diffplug.spotless' version '7.0.2'
+}
+
+allprojects {
+	group = 'io.github.sportne'
+	version = '0.1.0-SNAPSHOT'
+}
+
+repositories {
+	mavenCentral()
+}
+
+spotless {
+	groovyGradle {
+		target 'build.gradle', 'settings.gradle', 'app/build.gradle'
+		greclipse()
+	}
+
+	format('misc') {
+		target '.gitignore', '.gitattributes', 'README.md', 'docs/**/*.md', 'tasks/**/*.md'
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+}
+
+check {
+	dependsOn spotlessCheck
+}

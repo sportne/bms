@@ -45,4 +45,3 @@ docs/     Architecture, decisions, and development notes
 tasks/    Milestones and actionable implementation tasks
 examples/ Small generated-code usage examples
 ```
-

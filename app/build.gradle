@@ -6,31 +6,115 @@
  */
 
 plugins {
-    // Apply the application plugin to add support for building a CLI application in Java.
-    id 'application'
+	// Apply the application plugin to add support for building a CLI application in Java.
+	id 'application'
+	id 'jacoco'
+	id 'com.diffplug.spotless' version '7.0.2'
+	id 'com.github.spotbugs' version '6.0.27'
+	id 'org.graalvm.buildtools.native' version '0.11.1'
 }
 
 repositories {
-    // Use Maven Central for resolving dependencies.
-    mavenCentral()
+	// Use Maven Central for resolving dependencies.
+	mavenCentral()
 }
 
 dependencies {
-    // Use JUnit test framework.
-    testImplementation libs.junit
+	// Use JUnit test framework.
+	testImplementation libs.junit
 
-    // This dependency is used by the application.
-    implementation libs.guava
+	// This dependency is used by the application.
+	implementation libs.guava
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
 java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+base {
+	archivesName = 'sportne-bms'
 }
 
 application {
-    // Define the main class for the application.
-    mainClass = 'org.example.App'
+	// Define the main class for the application.
+	mainClass = 'io.github.sportne.bms.App'
+	applicationName = 'sportne-bms'
+}
+
+graalvmNative {
+	toolchainDetection = false
+
+	binaries {
+		all {
+			javaLauncher = javaToolchains.launcherFor {
+				languageVersion = JavaLanguageVersion.of(21)
+				vendor = org.gradle.jvm.toolchain.JvmVendorSpec.GRAAL_VM
+			}
+		}
+
+		named('main') {
+			imageName = 'bms'
+			mainClass = application.mainClass.get()
+			buildArgs.add('--no-fallback')
+		}
+	}
+}
+
+jacoco {
+	toolVersion = '0.8.12'
+}
+
+test {
+	finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.required = true
+		html.required = true
+	}
+}
+
+jacocoTestCoverageVerification {
+	dependsOn test
+	violationRules {
+		rule {
+			limit {
+				counter = 'LINE'
+				value = 'COVEREDRATIO'
+				minimum = 0.80
+			}
+		}
+	}
+}
+
+spotless {
+	java {
+		googleJavaFormat('1.18.1')
+		target 'src/*/java/**/*.java'
+	}
+}
+
+spotbugs {
+	effort = 'max'
+	reportLevel = 'low'
+	ignoreFailures = false
+}
+
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+	reports {
+		html.required = true
+		xml.required = false
+	}
+}
+
+check {
+	dependsOn spotlessCheck
+	dependsOn jacocoTestCoverageVerification
+	dependsOn spotbugsMain
+	dependsOn spotbugsTest
 }
