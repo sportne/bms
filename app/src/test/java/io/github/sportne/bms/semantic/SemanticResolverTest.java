@@ -617,4 +617,233 @@ class SemanticResolverTest {
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_UNKNOWN_TYPE")));
   }
+
+  /** Contract: duplicate reusable names are rejected across all reusable collection/type groups. */
+  @Test
+  void semanticResolverRejectsDuplicateNamesAcrossReusableTypeGroups() {
+    ParsedBitField bitField =
+        new ParsedBitField(
+            "DupType",
+            BitFieldSize.U8,
+            null,
+            "status bits",
+            List.of(new ParsedBitFlag("ready", 0, "ready")),
+            List.of());
+    ParsedBitField bitFieldDuplicate =
+        new ParsedBitField(
+            "DupType",
+            BitFieldSize.U8,
+            null,
+            "status bits duplicate",
+            List.of(new ParsedBitFlag("alarm", 1, "alarm")),
+            List.of());
+
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            " ",
+            List.of(
+                new ParsedMessageType("DupType", "first", "bad..namespace", List.of()),
+                new ParsedMessageType("DupType", "second", null, List.of())),
+            List.of(bitField, bitFieldDuplicate),
+            List.of(
+                new ParsedFloat(
+                    "DupType", FloatSize.F32, FloatEncoding.IEEE754, null, null, "float one"),
+                new ParsedFloat(
+                    "DupType", FloatSize.F32, FloatEncoding.IEEE754, null, null, "float two")),
+            List.of(
+                new ParsedScaledInt("DupType", "int16", new BigDecimal("1"), null, "scaled one"),
+                new ParsedScaledInt(
+                    "DupType", "notAType", new BigDecimal("1"), null, "scaled two")),
+            List.of(
+                new ParsedArray("DupType", "uint8", 2, null, "array one"),
+                new ParsedArray("DupType", "uint8", 2, null, "array two")),
+            List.of(
+                new ParsedVector(
+                    "DupType", "uint8", null, "vector one", new ParsedCountFieldLength("count")),
+                new ParsedVector(
+                    "DupType", "uint8", null, "vector two", new ParsedCountFieldLength("count"))),
+            List.of(
+                new ParsedBlobArray("DupType", 2, "blob array one"),
+                new ParsedBlobArray("DupType", 2, "blob array two")),
+            List.of(
+                new ParsedBlobVector(
+                    "DupType", "blob vector one", new ParsedTerminatorValueLength("00")),
+                new ParsedBlobVector(
+                    "DupType", "blob vector two", new ParsedTerminatorValueLength("00"))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_NAMESPACE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_MESSAGE_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_FLOAT_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_SCALED_INT_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_ARRAY_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_VECTOR_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_BLOB_ARRAY_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_BLOB_VECTOR_TYPE")));
+  }
+
+  /** Contract: duplicate message member names are enforced across all member kinds. */
+  @Test
+  void semanticResolverRejectsDuplicateNamesAcrossAllMessageMemberKinds() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("dup", "uint8", null, null, null, "dup field"),
+                        new ParsedFloat(
+                            "dup", FloatSize.F32, FloatEncoding.IEEE754, null, null, "dup float"),
+                        new ParsedScaledInt(
+                            "dup", "notAType", new BigDecimal("1"), null, "dup scaled"),
+                        new ParsedArray("dup", "MissingType", 2, null, "dup array"),
+                        new ParsedVector(
+                            "dup",
+                            "MissingType",
+                            null,
+                            "dup vector",
+                            new ParsedCountFieldLength("laterCount")),
+                        new ParsedBlobArray("dup", 4, "dup blob array"),
+                        new ParsedBlobVector(
+                            "dup", "dup blob vector", new ParsedTerminatorField("bad-name", null)),
+                        new ParsedField("laterCount", "uint8", null, null, null, "later")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_MEMBER_NAME")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_SCALED_INT_BASE_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_UNKNOWN_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_COUNT_FIELD_REF")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_LENGTH_MODE")));
+  }
+
+  /** Contract: bitField semantic checks catch duplicate names, positions, ranges, and variants. */
+  @Test
+  void semanticResolverRejectsDeepBitFieldConsistencyViolations() {
+    ParsedBitSegment firstSegment =
+        new ParsedBitSegment(
+            "segment",
+            3,
+            1,
+            "bad range",
+            List.of(
+                new ParsedBitVariant("mode", BigInteger.ZERO, "mode"),
+                new ParsedBitVariant("mode", BigInteger.ONE, "duplicate name")));
+    ParsedBitSegment secondSegment =
+        new ParsedBitSegment(
+            "segment",
+            7,
+            8,
+            "out of range",
+            List.of(new ParsedBitVariant("tooLarge", new BigInteger("9"), "too large")));
+    ParsedBitField bitField =
+        new ParsedBitField(
+            "statusWord",
+            BitFieldSize.U8,
+            null,
+            "status bits",
+            List.of(
+                new ParsedBitFlag("dup", 0, "dup"),
+                new ParsedBitFlag("dup", 8, "dup and out of range"),
+                new ParsedBitFlag("other", 0, "duplicate position")),
+            List.of(firstSegment, secondSegment));
+
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(new ParsedMessageType("Frame", "frame", null, List.of(bitField))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_FLAG_NAME")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_BIT_POSITION")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_FLAG_POSITION")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_SEGMENT_NAME")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_SEGMENT_RANGE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_VARIANT_NAME")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_VARIANT_VALUE")));
+  }
+
+  /** Contract: scaled floats without a scale value are rejected in semantic validation. */
+  @Test
+  void semanticResolverRejectsScaledFloatWithoutScale() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedFloat(
+                            "temperature",
+                            FloatSize.F32,
+                            FloatEncoding.SCALED,
+                            null,
+                            null,
+                            "temperature")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_FLOAT_SCALE")));
+  }
 }

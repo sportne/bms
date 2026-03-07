@@ -291,4 +291,63 @@ class BmsCliTest {
     assertEquals(2, exitCode);
     assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("missing path after --java"));
   }
+
+  @Test
+  /** Contract: `generate` requires at least one target option after the spec path. */
+  void generateCommandReturnsUsageErrorWhenTooFewArgumentsAreProvided() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate", TestSupport.resourcePath("specs/valid-foundation.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(2, exitCode);
+    assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("generate requires"));
+  }
+
+  @Test
+  /** Contract: `generate` reports a usage error when `--cpp` is missing its value. */
+  void generateCommandReturnsUsageErrorWhenCppValueIsMissing() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/valid-foundation.xml").toString(),
+              "--java",
+              tempDir.resolve("java").toString(),
+              "--cpp"
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(2, exitCode);
+    assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("missing path after --cpp"));
+  }
+
+  @Test
+  /** Contract: unexpected runtime argument parsing errors map to exit code 3. */
+  void validateCommandReturnsInternalErrorForInvalidPathLiteral() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {"validate", "\u0000bad-path"},
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(3, exitCode);
+    assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("Internal error"));
+  }
 }

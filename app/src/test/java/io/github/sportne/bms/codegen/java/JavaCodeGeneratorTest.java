@@ -168,6 +168,71 @@ class JavaCodeGeneratorTest {
                 diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF")));
   }
 
+  /** Contract: generator emits encode/decode code paths for every primitive integer type. */
+  @Test
+  void javaGeneratorCoversAllPrimitiveEncodeDecodeBranches() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedMessageType primitives =
+        new ResolvedMessageType(
+            "PrimitiveFrame",
+            "primitive frame",
+            "acme.telemetry",
+            List.of(
+                new ResolvedField(
+                    "u8", new PrimitiveTypeRef(PrimitiveType.UINT8), null, null, null, "u8"),
+                new ResolvedField(
+                    "u16",
+                    new PrimitiveTypeRef(PrimitiveType.UINT16),
+                    null,
+                    io.github.sportne.bms.model.Endian.LITTLE,
+                    null,
+                    "u16"),
+                new ResolvedField(
+                    "u32", new PrimitiveTypeRef(PrimitiveType.UINT32), null, null, null, "u32"),
+                new ResolvedField(
+                    "u64", new PrimitiveTypeRef(PrimitiveType.UINT64), null, null, null, "u64"),
+                new ResolvedField(
+                    "i8", new PrimitiveTypeRef(PrimitiveType.INT8), null, null, null, "i8"),
+                new ResolvedField(
+                    "i16", new PrimitiveTypeRef(PrimitiveType.INT16), null, null, null, "i16"),
+                new ResolvedField(
+                    "i32", new PrimitiveTypeRef(PrimitiveType.INT32), null, null, null, "i32"),
+                new ResolvedField(
+                    "i64", new PrimitiveTypeRef(PrimitiveType.INT64), null, null, null, "i64"),
+                new ResolvedField(
+                    "child", new MessageTypeRef("MissingMessage"), null, null, null, "child")));
+
+    ResolvedSchema schema = new ResolvedSchema("acme.telemetry", List.of(primitives));
+
+    generator.generate(schema, tempDir);
+
+    Path outputPath = tempDir.resolve("acme/telemetry/PrimitiveFrame.java");
+    String source = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertTrue(source.contains("writeUInt64"));
+    assertTrue(source.contains("writeInt64"));
+    assertTrue(source.contains("readUInt64"));
+    assertTrue(source.contains("readInt64"));
+    assertTrue(source.contains("public MissingMessage child;"));
+  }
+
+  /** Contract: IO failures when writing files return a generator IO diagnostic. */
+  @Test
+  void javaGeneratorReportsIoFailures() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = sampleSchema();
+
+    Path blockedPath = tempDir.resolve("acme");
+    Files.writeString(blockedPath, "not-a-directory", StandardCharsets.UTF_8);
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_IO_ERROR")));
+  }
+
   /** Builds a small resolved schema fixture shared by generator tests. */
   static ResolvedSchema sampleSchema() {
     ResolvedMessageType header =
