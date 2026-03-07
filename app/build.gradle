@@ -1,5 +1,6 @@
 plugins {
 	id 'application'
+	id 'checkstyle'
 	id 'jacoco'
 	id 'com.diffplug.spotless' version '7.0.2'
 	id 'com.github.spotbugs' version '6.0.27'
@@ -92,10 +93,22 @@ spotbugs {
 	ignoreFailures = false
 }
 
+checkstyle {
+	toolVersion = '10.17.0'
+	configFile = rootProject.file('config/checkstyle/checkstyle.xml')
+}
+
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
 	reports {
 		html.required = true
 		xml.required = false
+	}
+}
+
+tasks.withType(org.gradle.api.plugins.quality.Checkstyle).configureEach {
+	reports {
+		xml.required = false
+		html.required = true
 	}
 }
 
@@ -104,4 +117,6 @@ check {
 	dependsOn jacocoTestCoverageVerification
 	dependsOn spotbugsMain
 	dependsOn spotbugsTest
+	dependsOn checkstyleMain
+	dependsOn checkstyleTest
 }

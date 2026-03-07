@@ -25,10 +25,23 @@ public final class BmsCompiler {
   private final SpecParser specParser;
   private final SemanticResolver semanticResolver;
 
+  /**
+   * Creates a compiler using the provided XSD path.
+   *
+   * @param xsdPath path to the BMS XML schema file used for validation
+   * @throws BmsException if the XSD cannot be loaded
+   */
   public BmsCompiler(Path xsdPath) throws BmsException {
     this(SpecValidator.fromXsd(xsdPath), new SpecParser(), new SemanticResolver());
   }
 
+  /**
+   * Internal constructor used by tests to inject collaborators directly.
+   *
+   * @param specValidator validator instance for XSD checks
+   * @param specParser parser instance for XML-to-parsed-model conversion
+   * @param semanticResolver semantic resolver for parsed-to-resolved conversion
+   */
   BmsCompiler(
       SpecValidator specValidator, SpecParser specParser, SemanticResolver semanticResolver) {
     this.specValidator = specValidator;
@@ -36,6 +49,13 @@ public final class BmsCompiler {
     this.semanticResolver = semanticResolver;
   }
 
+  /**
+   * Runs the front-end pipeline for one spec file.
+   *
+   * @param specPath path to the XML spec file
+   * @return resolved schema ready for code generation
+   * @throws BmsException if validation, parsing, or semantic checks fail
+   */
   public ResolvedSchema compile(Path specPath) throws BmsException {
     specValidator.validateOrThrow(specPath);
     ParsedSchema parsedSchema = specParser.parse(specPath);

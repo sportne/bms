@@ -8,6 +8,11 @@ public enum FloatSize {
 
   private final String xmlValue;
 
+  /**
+   * Creates one enum entry.
+   *
+   * @param xmlValue XML literal for this float size
+   */
   FloatSize(String xmlValue) {
     this.xmlValue = xmlValue;
   }
@@ -17,7 +22,12 @@ public enum FloatSize {
     return xmlValue;
   }
 
-  /** Converts an XML literal such as {@code f32} into a {@link FloatSize}. */
+  /**
+   * Converts an XML literal such as {@code f32} into a {@link FloatSize}.
+   *
+   * @param value XML literal from the schema
+   * @return enum value matching that literal
+   */
   public static FloatSize fromXml(String value) {
     return switch (value) {
       case "f16" -> F16;

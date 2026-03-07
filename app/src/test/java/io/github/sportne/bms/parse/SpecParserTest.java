@@ -88,6 +88,7 @@ class SpecParserTest {
     assertEquals(1, parsedSchema.reusableBitFields().size());
     assertEquals(1, parsedSchema.reusableFloats().size());
     assertEquals(1, parsedSchema.reusableScaledInts().size());
+    assertEquals("statusWord", parsedSchema.reusableBitFields().get(0).name());
     assertEquals("TelemetryFloat", parsedSchema.reusableFloats().get(0).name());
 
     var message = parsedSchema.messageTypes().get(0);
@@ -95,6 +96,7 @@ class SpecParserTest {
     assertEquals(6, message.members().size());
     assertEquals("version", message.fields().get(0).name());
     assertTrue(message.members().get(1) instanceof ParsedBitField);
+    assertEquals("statusBits", ((ParsedBitField) message.members().get(1)).name());
     assertEquals("temperature", ((ParsedFloat) message.members().get(2)).name());
     assertEquals(FloatEncoding.SCALED, ((ParsedFloat) message.members().get(2)).encoding());
     assertTrue(message.members().get(3) instanceof ParsedScaledInt);

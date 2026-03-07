@@ -8,9 +8,15 @@ import java.nio.file.Path;
 
 /** Shared helper methods used by unit tests. */
 public final class TestSupport {
+  /** Utility class; not meant to be instantiated. */
   private TestSupport() {}
 
-  /** Resolves a classpath resource to an absolute path for test usage. */
+  /**
+   * Resolves a classpath resource to an absolute path for test usage.
+   *
+   * @param resourcePath classpath-relative resource path
+   * @return filesystem path for that resource
+   */
   public static Path resourcePath(String resourcePath) {
     try {
       var resourceUrl =
@@ -26,7 +32,12 @@ public final class TestSupport {
     }
   }
 
-  /** Reads a classpath resource as UTF-8 text. */
+  /**
+   * Reads a classpath resource as UTF-8 text.
+   *
+   * @param resourcePath classpath-relative resource path
+   * @return resource contents as text
+   */
   public static String readResource(String resourcePath) {
     try {
       return Files.readString(resourcePath(resourcePath), StandardCharsets.UTF_8);

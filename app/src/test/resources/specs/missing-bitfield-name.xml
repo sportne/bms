@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.numeric">
+  <messageType name="TelemetryFrame" comment="Telemetry frame">
+    <bitField size="u8" comment="Inline status bits">
+      <flag name="alarm" position="0" comment="Alarm flag"/>
+    </bitField>
+  </messageType>
+</schema>

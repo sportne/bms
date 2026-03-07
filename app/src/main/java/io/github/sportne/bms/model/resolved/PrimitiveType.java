@@ -21,6 +21,13 @@ public enum PrimitiveType {
   private final String javaTypeName;
   private final String cppTypeName;
 
+  /**
+   * Creates one primitive type mapping entry.
+   *
+   * @param schemaName type name used in XML
+   * @param javaTypeName Java type name used by Java generation
+   * @param cppTypeName C++ type name used by C++ generation
+   */
   PrimitiveType(String schemaName, String javaTypeName, String cppTypeName) {
     this.schemaName = schemaName;
     this.javaTypeName = javaTypeName;
@@ -42,7 +49,12 @@ public enum PrimitiveType {
     return cppTypeName;
   }
 
-  /** Looks up a primitive type by XML schema name, or returns {@code null} when unknown. */
+  /**
+   * Looks up a primitive type by XML schema name, or returns {@code null} when unknown.
+   *
+   * @param schemaName primitive type name from XML (for example {@code uint16})
+   * @return matching primitive type, or {@code null} when not recognized
+   */
   public static PrimitiveType fromSchemaName(String schemaName) {
     return Arrays.stream(values())
         .filter(primitiveType -> primitiveType.schemaName.equals(schemaName))

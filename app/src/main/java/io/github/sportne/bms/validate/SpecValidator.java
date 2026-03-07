@@ -27,11 +27,22 @@ import org.xml.sax.SAXParseException;
 public final class SpecValidator {
   private final Schema schema;
 
+  /**
+   * Creates a validator wrapper around a compiled XSD schema.
+   *
+   * @param schema compiled XSD schema object
+   */
   private SpecValidator(Schema schema) {
     this.schema = schema;
   }
 
-  /** Creates a validator from an XSD file path. */
+  /**
+   * Creates a validator from an XSD file path.
+   *
+   * @param xsdPath path to the XSD file
+   * @return validator instance backed by that schema
+   * @throws BmsException if the XSD file cannot be read or parsed
+   */
   public static SpecValidator fromXsd(Path xsdPath) throws BmsException {
     try {
       SchemaFactory schemaFactory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
@@ -52,6 +63,12 @@ public final class SpecValidator {
     }
   }
 
+  /**
+   * Validates one XML spec against the loaded schema.
+   *
+   * @param specPath path to the XML spec file
+   * @return immutable diagnostics list (possibly empty)
+   */
   public List<Diagnostic> validate(Path specPath) {
     List<Diagnostic> diagnostics = new ArrayList<>();
     var validator = schema.newValidator();
@@ -84,7 +101,12 @@ public final class SpecValidator {
     return List.copyOf(diagnostics);
   }
 
-  /** Validates a spec and throws when any error-level diagnostic exists. */
+  /**
+   * Validates a spec and throws when any error-level diagnostic exists.
+   *
+   * @param specPath path to the XML spec file
+   * @throws BmsException if one or more error diagnostics are produced
+   */
   public void validateOrThrow(Path specPath) throws BmsException {
     List<Diagnostic> diagnostics = validate(specPath);
     if (Diagnostics.hasErrors(diagnostics)) {
@@ -96,26 +118,55 @@ public final class SpecValidator {
     private final Path specPath;
     private final List<Diagnostic> diagnostics;
 
+    /**
+     * Creates an error collector for one XML spec file.
+     *
+     * @param specPath XML spec path used in diagnostics
+     * @param diagnostics list that receives created diagnostics
+     */
     private CollectingErrorHandler(Path specPath, List<Diagnostic> diagnostics) {
       this.specPath = specPath;
       this.diagnostics = diagnostics;
     }
 
+    /**
+     * Receives one XSD warning.
+     *
+     * @param exception parser warning details from SAX
+     */
     @Override
     public void warning(SAXParseException exception) {
       diagnostics.add(toDiagnostic("XSD_WARNING", DiagnosticSeverity.WARNING, exception));
     }
 
+    /**
+     * Receives one XSD non-fatal validation error.
+     *
+     * @param exception parser error details from SAX
+     */
     @Override
     public void error(SAXParseException exception) {
       diagnostics.add(toDiagnostic("XSD_ERROR", DiagnosticSeverity.ERROR, exception));
     }
 
+    /**
+     * Receives one XSD fatal validation error.
+     *
+     * @param exception parser fatal-error details from SAX
+     */
     @Override
     public void fatalError(SAXParseException exception) {
       diagnostics.add(toDiagnostic("XSD_FATAL", DiagnosticSeverity.ERROR, exception));
     }
 
+    /**
+     * Converts one SAX parser issue into the shared diagnostic format.
+     *
+     * @param code stable diagnostic code
+     * @param severity diagnostic severity level
+     * @param exception SAX parser exception with location and message
+     * @return converted diagnostic
+     */
     private Diagnostic toDiagnostic(
         String code, DiagnosticSeverity severity, SAXParseException exception) {
       return new Diagnostic(

@@ -14,6 +14,12 @@ struct Packet {
   std::uint32_t payloadLength{};
 
   std::vector<std::uint8_t> encode() const;
+  /**
+   * Decodes a message instance from binary input.
+   *
+   * @param data encoded message bytes
+   * @return decoded Packet value
+   */
   static Packet decode(std::span<const std::uint8_t> data);
 };
 

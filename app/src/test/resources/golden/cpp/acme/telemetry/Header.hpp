@@ -12,6 +12,12 @@ struct Header {
   std::uint16_t sequence{};
 
   std::vector<std::uint8_t> encode() const;
+  /**
+   * Decodes a message instance from binary input.
+   *
+   * @param data encoded message bytes
+   * @return decoded Header value
+   */
   static Header decode(std::span<const std::uint8_t> data);
 };
 

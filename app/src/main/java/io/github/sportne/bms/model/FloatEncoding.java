@@ -7,6 +7,11 @@ public enum FloatEncoding {
 
   private final String xmlValue;
 
+  /**
+   * Creates one enum entry.
+   *
+   * @param xmlValue XML literal for this encoding
+   */
   FloatEncoding(String xmlValue) {
     this.xmlValue = xmlValue;
   }
@@ -16,7 +21,12 @@ public enum FloatEncoding {
     return xmlValue;
   }
 
-  /** Converts an XML literal such as {@code ieee754} into a {@link FloatEncoding}. */
+  /**
+   * Converts an XML literal such as {@code ieee754} into a {@link FloatEncoding}.
+   *
+   * @param value XML literal from the schema
+   * @return enum value matching that literal
+   */
   public static FloatEncoding fromXml(String value) {
     return switch (value) {
       case "ieee754" -> IEEE754;

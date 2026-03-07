@@ -19,6 +19,12 @@ public enum BitFieldSize {
   private final String xmlValue;
   private final int bitWidth;
 
+  /**
+   * Creates one enum entry.
+   *
+   * @param xmlValue XML literal for this size
+   * @param bitWidth number of bits represented by this size
+   */
   BitFieldSize(String xmlValue, int bitWidth) {
     this.xmlValue = xmlValue;
     this.bitWidth = bitWidth;
@@ -29,7 +35,12 @@ public enum BitFieldSize {
     return bitWidth;
   }
 
-  /** Converts an XML literal such as {@code u8} into a {@link BitFieldSize}. */
+  /**
+   * Converts an XML literal such as {@code u8} into a {@link BitFieldSize}.
+   *
+   * @param value XML literal from the schema
+   * @return enum value matching that literal
+   */
   public static BitFieldSize fromXml(String value) {
     return switch (value) {
       case "u8" -> U8;

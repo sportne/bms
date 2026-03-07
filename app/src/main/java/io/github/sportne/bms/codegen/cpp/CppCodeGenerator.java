@@ -30,7 +30,13 @@ import java.util.TreeSet;
  */
 public final class CppCodeGenerator {
 
-  /** Writes generated C++ header/source files into the provided output directory. */
+  /**
+   * Writes generated C++ header/source files into the provided output directory.
+   *
+   * @param schema resolved schema to generate from
+   * @param outputDirectory target directory for generated C++ files
+   * @throws BmsException if generation fails
+   */
   public void generate(ResolvedSchema schema, Path outputDirectory) throws BmsException {
     Map<String, ResolvedMessageType> messageTypeByName = indexMessageTypes(schema);
 
@@ -62,6 +68,13 @@ public final class CppCodeGenerator {
     }
   }
 
+  /**
+   * Verifies that this generator supports every member in the message.
+   *
+   * @param messageType message being generated
+   * @param sourcePath output source path used in diagnostics
+   * @throws BmsException if unsupported members or type references are found
+   */
   private static void ensureSupportedMembers(ResolvedMessageType messageType, Path sourcePath)
       throws BmsException {
     List<Diagnostic> diagnostics = new ArrayList<>();
@@ -104,6 +117,12 @@ public final class CppCodeGenerator {
     }
   }
 
+  /**
+   * Builds a stable lookup map from message type name to resolved message object.
+   *
+   * @param schema resolved schema that contains message types
+   * @return immutable map keyed by message type name
+   */
   private static Map<String, ResolvedMessageType> indexMessageTypes(ResolvedSchema schema) {
     Map<String, ResolvedMessageType> messageTypeByName = new LinkedHashMap<>();
     for (ResolvedMessageType messageType : schema.messageTypes()) {
@@ -112,6 +131,13 @@ public final class CppCodeGenerator {
     return Map.copyOf(messageTypeByName);
   }
 
+  /**
+   * Renders one C++ header file for a resolved message.
+   *
+   * @param messageType message type to render
+   * @param messageTypeByName lookup for resolving cross-message includes
+   * @return generated C++ header source
+   */
   private static String renderHeader(
       ResolvedMessageType messageType, Map<String, ResolvedMessageType> messageTypeByName) {
     StringBuilder builder = new StringBuilder();
@@ -152,6 +178,14 @@ public final class CppCodeGenerator {
     builder.append("\n");
     builder.append("  std::vector<std::uint8_t> encode() const;\n");
     builder
+        .append("  /**\n")
+        .append("   * Decodes a message instance from binary input.\n")
+        .append("   *\n")
+        .append("   * @param data encoded message bytes\n")
+        .append("   * @return decoded ")
+        .append(messageType.name())
+        .append(" value\n")
+        .append("   */\n")
         .append("  static ")
         .append(messageType.name())
         .append(" decode(std::span<const std::uint8_t> data);\n");
@@ -161,6 +195,12 @@ public final class CppCodeGenerator {
     return builder.toString();
   }
 
+  /**
+   * Renders one C++ source file for a resolved message.
+   *
+   * @param messageType message type to render
+   * @return generated C++ source text
+   */
   private static String renderSource(ResolvedMessageType messageType) {
     StringBuilder builder = new StringBuilder();
     builder.append("#include \"").append(headerIncludePath(messageType)).append("\"\n\n");
@@ -176,6 +216,14 @@ public final class CppCodeGenerator {
         .append("}\n\n");
 
     builder
+        .append("/**\n")
+        .append(" * Decodes a message instance from binary input.\n")
+        .append(" *\n")
+        .append(" * @param data encoded message bytes\n")
+        .append(" * @return decoded ")
+        .append(messageType.name())
+        .append(" value\n")
+        .append(" */\n")
         .append(messageType.name())
         .append(' ')
         .append(messageType.name())
@@ -188,6 +236,14 @@ public final class CppCodeGenerator {
     return builder.toString();
   }
 
+  /**
+   * Resolves a field type reference into a C++ type name.
+   *
+   * @param typeRef resolved type reference
+   * @param currentNamespace namespace of the current generated message
+   * @param messageTypeByName lookup for message references
+   * @return C++ type name used in generated source
+   */
   private static String toCppType(
       ResolvedTypeRef typeRef,
       String currentNamespace,
@@ -207,10 +263,22 @@ public final class CppCodeGenerator {
     return "::" + toCppNamespace(referenced.effectiveNamespace()) + "::" + referenced.name();
   }
 
+  /**
+   * Builds the relative include path for one message header.
+   *
+   * @param messageType message type that owns the header
+   * @return include path using slash-separated namespace segments
+   */
   private static String headerIncludePath(ResolvedMessageType messageType) {
     return messageType.effectiveNamespace().replace('.', '/') + "/" + messageType.name() + ".hpp";
   }
 
+  /**
+   * Appends nested namespace open lines to a source builder.
+   *
+   * @param builder destination source builder
+   * @param namespaceValue dot-delimited namespace
+   */
   private static void appendNamespaceOpen(StringBuilder builder, String namespaceValue) {
     for (String segment : splitNamespace(namespaceValue)) {
       builder.append("namespace ").append(segment).append(" {\n");
@@ -218,6 +286,12 @@ public final class CppCodeGenerator {
     builder.append('\n');
   }
 
+  /**
+   * Appends nested namespace close lines to a source builder.
+   *
+   * @param builder destination source builder
+   * @param namespaceValue dot-delimited namespace
+   */
   private static void appendNamespaceClose(StringBuilder builder, String namespaceValue) {
     List<String> segments = splitNamespace(namespaceValue);
     for (int index = segments.size() - 1; index >= 0; index--) {
@@ -225,6 +299,12 @@ public final class CppCodeGenerator {
     }
   }
 
+  /**
+   * Splits a dot-delimited namespace into individual non-blank segments.
+   *
+   * @param namespaceValue dot-delimited namespace
+   * @return namespace segments in order
+   */
   private static List<String> splitNamespace(String namespaceValue) {
     String[] rawSegments = namespaceValue.split("\\.");
     List<String> segments = new ArrayList<>();
@@ -236,6 +316,12 @@ public final class CppCodeGenerator {
     return segments;
   }
 
+  /**
+   * Converts a dot-delimited namespace to a C++ {@code ::}-delimited namespace.
+   *
+   * @param namespaceValue dot-delimited namespace
+   * @return C++ namespace string
+   */
   private static String toCppNamespace(String namespaceValue) {
     return String.join("::", splitNamespace(namespaceValue));
   }

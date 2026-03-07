@@ -54,6 +54,11 @@ public final class SemanticResolver {
    * Builds the resolved schema.
    *
    * <p>If any semantic error exists, this method throws a {@link BmsException} with diagnostics.
+   *
+   * @param parsedSchema parsed schema produced by the parser
+   * @param sourcePath human-readable source path used in diagnostics
+   * @return resolved schema ready for code generation
+   * @throws BmsException if one or more semantic errors are found
    */
   public ResolvedSchema resolve(ParsedSchema parsedSchema, String sourcePath) throws BmsException {
     List<Diagnostic> diagnostics = new ArrayList<>();
@@ -167,8 +172,16 @@ public final class SemanticResolver {
               parsedScaledInt.comment()));
     }
 
+    Set<String> reusableBitFieldNames = new HashSet<>();
     List<ResolvedBitField> resolvedReusableBitFields = new ArrayList<>();
     for (ParsedBitField parsedBitField : parsedSchema.reusableBitFields()) {
+      if (!reusableBitFieldNames.add(parsedBitField.name())) {
+        diagnostics.add(
+            error(
+                "SEMANTIC_DUPLICATE_ROOT_BIT_FIELD_NAME",
+                "Duplicate schema-level bitField name: " + parsedBitField.name(),
+                sourcePath));
+      }
       resolvedReusableBitFields.add(resolveBitField(parsedBitField, sourcePath, diagnostics));
     }
 
@@ -225,6 +238,16 @@ public final class SemanticResolver {
         }
 
         if (member instanceof ParsedBitField parsedBitField) {
+          if (!namedMembers.add(parsedBitField.name())) {
+            diagnostics.add(
+                error(
+                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
+                    "Duplicate member name in message "
+                        + parsedMessageType.name()
+                        + ": "
+                        + parsedBitField.name(),
+                    sourcePath));
+          }
           resolvedMembers.add(resolveBitField(parsedBitField, sourcePath, diagnostics));
           continue;
         }
@@ -320,6 +343,18 @@ public final class SemanticResolver {
         resolvedReusableScaledInts);
   }
 
+  /**
+   * Resolves a parsed field type name to a concrete resolved type reference.
+   *
+   * @param typeName type name from XML
+   * @param messageName owning message name used in diagnostics
+   * @param messageTypeByName lookup of parsed message types
+   * @param reusableFloatByName lookup of reusable float definitions
+   * @param reusableScaledIntByName lookup of reusable scaled-int definitions
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   * @return resolved type reference, or {@code null} when unresolved
+   */
   private static ResolvedTypeRef resolveFieldTypeRef(
       String typeName,
       String messageName,
@@ -350,8 +385,23 @@ public final class SemanticResolver {
     return null;
   }
 
+  /**
+   * Resolves one parsed bitfield, including nested validation and conversion.
+   *
+   * @param parsedBitField parsed bitfield object
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   * @return resolved bitfield object
+   */
   private static ResolvedBitField resolveBitField(
       ParsedBitField parsedBitField, String sourcePath, List<Diagnostic> diagnostics) {
+    validateIdentifier(
+        parsedBitField.name(),
+        "SEMANTIC_INVALID_BIT_FIELD_NAME",
+        "bitField name must be a valid identifier: ",
+        sourcePath,
+        diagnostics);
+
     int bitWidth = parsedBitField.size().bitWidth();
 
     Set<String> usedNames = new HashSet<>();
@@ -378,7 +428,10 @@ public final class SemanticResolver {
         diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_BIT_MEMBER_NAME",
-                "Duplicate bitField member name: " + parsedFlag.name(),
+                "Duplicate bitField member name in "
+                    + parsedBitField.name()
+                    + ": "
+                    + parsedFlag.name(),
                 sourcePath));
       }
       if (parsedFlag.position() >= bitWidth) {
@@ -388,7 +441,9 @@ public final class SemanticResolver {
                 "Flag position "
                     + parsedFlag.position()
                     + " is outside bitField size "
-                    + parsedBitField.size().xmlValue(),
+                    + parsedBitField.size().xmlValue()
+                    + " for bitField "
+                    + parsedBitField.name(),
                 sourcePath));
       }
       if (!flagPositions.add(parsedFlag.position())) {
@@ -424,7 +479,10 @@ public final class SemanticResolver {
         diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_BIT_MEMBER_NAME",
-                "Duplicate bitField member name: " + parsedSegment.name(),
+                "Duplicate bitField member name in "
+                    + parsedBitField.name()
+                    + ": "
+                    + parsedSegment.name(),
                 sourcePath));
       }
 
@@ -500,6 +558,7 @@ public final class SemanticResolver {
     }
 
     return new ResolvedBitField(
+        parsedBitField.name(),
         parsedBitField.size(),
         parsedBitField.endian(),
         parsedBitField.comment(),
@@ -507,6 +566,13 @@ public final class SemanticResolver {
         resolvedSegments);
   }
 
+  /**
+   * Validates scale rules for float definitions.
+   *
+   * @param parsedFloat parsed float object
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
   private static void validateFloatScaleRules(
       ParsedFloat parsedFloat, String sourcePath, List<Diagnostic> diagnostics) {
     if (parsedFloat.encoding() == io.github.sportne.bms.model.FloatEncoding.SCALED
@@ -527,6 +593,15 @@ public final class SemanticResolver {
     }
   }
 
+  /**
+   * Validates that a value matches identifier syntax.
+   *
+   * @param value value being checked
+   * @param code diagnostic code to use on failure
+   * @param messagePrefix message prefix used on failure
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
   private static void validateIdentifier(
       String value,
       String code,
@@ -538,6 +613,14 @@ public final class SemanticResolver {
     }
   }
 
+  /**
+   * Validates that a namespace is non-blank and dot-delimited identifier segments.
+   *
+   * @param namespace namespace value to validate
+   * @param attributeName attribute label used in diagnostics
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
   private static void validateNamespace(
       String namespace, String attributeName, String sourcePath, List<Diagnostic> diagnostics) {
     if (namespace == null || namespace.isBlank()) {
@@ -554,6 +637,14 @@ public final class SemanticResolver {
     }
   }
 
+  /**
+   * Builds one error-level diagnostic with unknown line/column.
+   *
+   * @param code stable diagnostic code
+   * @param message human-readable diagnostic message
+   * @param sourcePath source path used in diagnostics
+   * @return error diagnostic
+   */
   private static Diagnostic error(String code, String message, String sourcePath) {
     return new Diagnostic(DiagnosticSeverity.ERROR, code, message, sourcePath, -1, -1);
   }

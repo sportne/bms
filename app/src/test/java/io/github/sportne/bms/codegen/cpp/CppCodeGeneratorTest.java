@@ -86,7 +86,8 @@ class CppCodeGeneratorTest {
             "Telemetry message",
             "acme.telemetry",
             List.of(
-                new ResolvedBitField(BitFieldSize.U8, null, "Status bits", List.of(), List.of()),
+                new ResolvedBitField(
+                    "statusBits", BitFieldSize.U8, null, "Status bits", List.of(), List.of()),
                 new ResolvedField(
                     "temperature", new FloatTypeRef("TelemetryFloat"), null, null, null, "temp"),
                 new ResolvedField(

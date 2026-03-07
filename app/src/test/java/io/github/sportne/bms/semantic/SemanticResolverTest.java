@@ -125,6 +125,128 @@ class SemanticResolverTest {
             .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_FIELD_NAME")));
   }
 
+  /** Contract: bitField names must be valid identifiers at the message-member level. */
+  @Test
+  void semanticResolverRejectsInvalidBitFieldName() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Header",
+                    "header",
+                    null,
+                    List.of(
+                        new ParsedBitField(
+                            "status-bits",
+                            BitFieldSize.U8,
+                            null,
+                            "Status bits",
+                            List.of(new ParsedBitFlag("ready", 0, "Ready flag")),
+                            List.of())))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_BIT_FIELD_NAME")));
+  }
+
+  /** Contract: top-level message-member names are unique across fields and bitFields. */
+  @Test
+  void semanticResolverRejectsDuplicateTopLevelNameBetweenFieldAndBitField() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Header",
+                    "header",
+                    null,
+                    List.of(
+                        new ParsedField("status", "uint8", null, null, null, "status"),
+                        new ParsedBitField(
+                            "status",
+                            BitFieldSize.U8,
+                            null,
+                            "Status bits",
+                            List.of(new ParsedBitFlag("ready", 0, "Ready flag")),
+                            List.of())))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_MEMBER_NAME")));
+  }
+
+  /** Contract: schema-level reusable bitField names must be unique at that level. */
+  @Test
+  void semanticResolverRejectsDuplicateRootBitFieldNames() {
+    ParsedBitField first =
+        new ParsedBitField(
+            "statusWord",
+            BitFieldSize.U8,
+            null,
+            "Status bits",
+            List.of(new ParsedBitFlag("ready", 0, "Ready flag")),
+            List.of());
+    ParsedBitField second =
+        new ParsedBitField(
+            "statusWord",
+            BitFieldSize.U8,
+            null,
+            "Other status bits",
+            List.of(new ParsedBitFlag("alarm", 1, "Alarm flag")),
+            List.of());
+
+    ParsedSchema parsedSchema =
+        new ParsedSchema("acme.telemetry", List.of(), List.of(first, second), List.of(), List.of());
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_ROOT_BIT_FIELD_NAME")));
+  }
+
+  /** Contract: nested flag/segment names can repeat across different top-level bitFields. */
+  @Test
+  void semanticResolverAllowsNestedNameReuseAcrossDifferentBitFields() throws Exception {
+    ParsedBitField first =
+        new ParsedBitField(
+            "statusA",
+            BitFieldSize.U8,
+            null,
+            "First status bits",
+            List.of(new ParsedBitFlag("ready", 0, "Ready flag")),
+            List.of());
+    ParsedBitField second =
+        new ParsedBitField(
+            "statusB",
+            BitFieldSize.U8,
+            null,
+            "Second status bits",
+            List.of(new ParsedBitFlag("ready", 0, "Ready flag")),
+            List.of());
+
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(new ParsedMessageType("Header", "header", null, List.of(first, second))));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+
+    assertEquals(2, resolved.messageTypes().get(0).members().size());
+  }
+
   /** Contract: reusable float/scaledInt type names resolve to dedicated type refs. */
   @Test
   void semanticResolverResolvesReusableNumericTypeReferences() throws Exception {
@@ -175,6 +297,7 @@ class SemanticResolverTest {
                     null,
                     List.of(
                         new ParsedBitField(
+                            "statusBits",
                             BitFieldSize.U8,
                             null,
                             "Status bits",
@@ -204,6 +327,7 @@ class SemanticResolverTest {
             List.of(new ParsedBitVariant("off", BigInteger.ZERO, "off status")));
     ParsedBitField bitField =
         new ParsedBitField(
+            "statusBits",
             BitFieldSize.U8,
             null,
             "Status bits",
@@ -236,7 +360,8 @@ class SemanticResolverTest {
             "mode bits",
             List.of(new ParsedBitVariant("tooLarge", new BigInteger("7"), "out of range")));
     ParsedBitField bitField =
-        new ParsedBitField(BitFieldSize.U8, null, "Status bits", List.of(), List.of(segment));
+        new ParsedBitField(
+            "statusBits", BitFieldSize.U8, null, "Status bits", List.of(), List.of(segment));
 
     ParsedSchema parsedSchema =
         new ParsedSchema(

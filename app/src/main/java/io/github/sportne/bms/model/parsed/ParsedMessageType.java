@@ -7,10 +7,22 @@ import java.util.Objects;
  * Parsed representation of one {@code messageType} definition.
  *
  * <p>This layer keeps data close to XML and postpones deeper checks to semantic resolution.
+ *
+ * @param name message type name
+ * @param comment human-readable description
+ * @param namespaceOverride optional namespace override for this message
+ * @param members members in exact XML declaration order
  */
 public record ParsedMessageType(
     String name, String comment, String namespaceOverride, List<ParsedMessageMember> members) {
-
+  /**
+   * Creates a parsed message-type object.
+   *
+   * @param name message type name
+   * @param comment human-readable description
+   * @param namespaceOverride optional namespace override
+   * @param members members in declaration order
+   */
   public ParsedMessageType {
     name = Objects.requireNonNull(name, "name");
     comment = Objects.requireNonNull(comment, "comment");

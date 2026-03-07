@@ -8,10 +8,22 @@ import java.util.Objects;
  *
  * <p>{@code effectiveNamespace} is the final namespace after applying schema defaults and optional
  * per-message overrides.
+ *
+ * @param name message type name
+ * @param comment human-readable description
+ * @param effectiveNamespace final namespace used by generators
+ * @param members resolved members in exact declaration order
  */
 public record ResolvedMessageType(
     String name, String comment, String effectiveNamespace, List<ResolvedMessageMember> members) {
-
+  /**
+   * Creates a resolved message type.
+   *
+   * @param name message type name
+   * @param comment human-readable description
+   * @param effectiveNamespace final namespace after default/override rules
+   * @param members resolved members in declaration order
+   */
   public ResolvedMessageType {
     name = Objects.requireNonNull(name, "name");
     comment = Objects.requireNonNull(comment, "comment");

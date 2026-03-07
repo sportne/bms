@@ -61,6 +61,20 @@ class SpecValidatorTest {
     validator.validateOrThrow(specPath);
   }
 
+  /** Contract: bitField now requires a `name` attribute by XSD contract. */
+  @Test
+  void missingBitFieldNameFailsXsdValidation() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = TestSupport.resourcePath("specs/missing-bitfield-name.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> validator.validateOrThrow(specPath));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
+  }
+
   /** Contract: missing input files produce an IO diagnostic instead of crashing. */
   @Test
   void validatorReportsIoErrorForMissingSpecPath() throws Exception {

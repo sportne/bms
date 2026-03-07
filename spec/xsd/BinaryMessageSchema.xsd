@@ -180,6 +180,7 @@
         </xs:complexType>
       </xs:element>
     </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="size" type="bitFieldSizeType" use="required"/>
     <xs:attribute name="endian" type="endianType" use="optional"/>
     <xs:attribute name="comment" type="xs:string" use="required"/>

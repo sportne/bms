@@ -53,13 +53,20 @@ public final class SpecParser {
 
   private final XMLInputFactory inputFactory;
 
+  /** Creates a parser and disables XML features that are not needed for BMS files. */
   public SpecParser() {
     inputFactory = XMLInputFactory.newFactory();
     inputFactory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
     inputFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
   }
 
-  /** Parses one XML spec file into the parsed model layer. */
+  /**
+   * Parses one XML spec file into the parsed model layer.
+   *
+   * @param specPath path to the XML spec file
+   * @return parsed schema object
+   * @throws BmsException if reading or parsing fails
+   */
   public ParsedSchema parse(Path specPath) throws BmsException {
     try (InputStream inputStream = Files.newInputStream(specPath)) {
       XMLStreamReader reader = inputFactory.createXMLStreamReader(inputStream);
@@ -100,6 +107,14 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Advances the reader to the first XML start element.
+   *
+   * @param reader active XML reader
+   * @param specPath source file path used in diagnostics
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if the XML document has no root element
+   */
   private static void moveToRootElement(XMLStreamReader reader, Path specPath)
       throws XMLStreamException, BmsException {
     while (reader.hasNext() && reader.getEventType() != XMLStreamConstants.START_ELEMENT) {
@@ -111,6 +126,15 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Parses all supported direct children under {@code <schema>}.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <schema>}
+   * @return grouped root-level items
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if unsupported or malformed XML is found
+   */
   private RootItems parseRootChildren(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     List<ParsedMessageType> messageTypes = new ArrayList<>();
@@ -142,6 +166,15 @@ public final class SpecParser {
         -1);
   }
 
+  /**
+   * Parses one {@code <messageType>} element and preserves member order.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <messageType>}
+   * @return parsed message type
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or child elements are invalid
+   */
   private ParsedMessageType parseMessageType(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -173,6 +206,15 @@ public final class SpecParser {
         -1);
   }
 
+  /**
+   * Parses one {@code <field>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <field>}
+   * @return parsed field
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if a required attribute is missing or invalid
+   */
   private ParsedField parseField(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -192,8 +234,18 @@ public final class SpecParser {
     return new ParsedField(name, normalizedTypeName, length, endian, fixed, comment);
   }
 
+  /**
+   * Parses one {@code <bitField>} element and its nested members.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <bitField>}
+   * @return parsed bitfield
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or nested elements are invalid
+   */
   private ParsedBitField parseBitField(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
+    String name = requireAttribute(specPath, reader, "name");
     String rawSize = requireAttribute(specPath, reader, "size");
     String comment = requireAttribute(specPath, reader, "comment");
 
@@ -226,7 +278,7 @@ public final class SpecParser {
         }
       }
       if (event == XMLStreamConstants.END_ELEMENT && "bitField".equals(reader.getLocalName())) {
-        return new ParsedBitField(size, endian, comment, flags, segments);
+        return new ParsedBitField(name, size, endian, comment, flags, segments);
       }
     }
 
@@ -238,6 +290,15 @@ public final class SpecParser {
         -1);
   }
 
+  /**
+   * Parses one {@code <flag>} entry under a bitfield.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <flag>}
+   * @return parsed flag
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes are missing or invalid
+   */
   private ParsedBitFlag parseBitFlag(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -250,6 +311,15 @@ public final class SpecParser {
     return new ParsedBitFlag(name, position, comment);
   }
 
+  /**
+   * Parses one {@code <segment>} entry under a bitfield.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <segment>}
+   * @return parsed segment
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or nested variants are invalid
+   */
   private ParsedBitSegment parseBitSegment(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -284,6 +354,15 @@ public final class SpecParser {
         -1);
   }
 
+  /**
+   * Parses one {@code <variant>} entry under a segment.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <variant>}
+   * @return parsed variant
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes are missing or invalid
+   */
   private ParsedBitVariant parseBitVariant(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -295,6 +374,15 @@ public final class SpecParser {
     return new ParsedBitVariant(name, value, comment);
   }
 
+  /**
+   * Parses one {@code <float>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <float>}
+   * @return parsed float
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes are missing or invalid
+   */
   private ParsedFloat parseFloat(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -336,6 +424,15 @@ public final class SpecParser {
     return new ParsedFloat(name, size, encoding, scale, endian, comment);
   }
 
+  /**
+   * Parses one {@code <scaledInt>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <scaledInt>}
+   * @return parsed scaled-int
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes are missing or invalid
+   */
   private ParsedScaledInt parseScaledInt(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
@@ -350,6 +447,15 @@ public final class SpecParser {
     return new ParsedScaledInt(name, baseTypeName, scale, endian, comment);
   }
 
+  /**
+   * Ensures the current element has no nested start elements.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param elementName element expected to close next
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if a nested element is found
+   */
   private static void expectNoNestedElements(
       Path specPath, XMLStreamReader reader, String elementName)
       throws XMLStreamException, BmsException {
@@ -375,6 +481,15 @@ public final class SpecParser {
         -1);
   }
 
+  /**
+   * Parses an optional {@code endian} attribute.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param context element name used in diagnostic text
+   * @return parsed endian value, or {@code null} when not present
+   * @throws BmsException if the attribute value is invalid
+   */
   private static Endian parseOptionalEndian(Path specPath, XMLStreamReader reader, String context)
       throws BmsException {
     String endianValue = reader.getAttributeValue(null, "endian");
@@ -392,6 +507,16 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Parses an integer attribute that must be positive.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param attributeName attribute name used in diagnostics
+   * @param value raw attribute value text
+   * @return parsed integer value
+   * @throws BmsException if the value is not a positive integer
+   */
   private static int parsePositiveInteger(
       Path specPath, XMLStreamReader reader, String attributeName, String value)
       throws BmsException {
@@ -414,6 +539,16 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Parses an integer attribute limited to the range {@code 0..255}.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param attributeName attribute name used in diagnostics
+   * @param value raw attribute value text
+   * @return parsed integer value
+   * @throws BmsException if the value is not in {@code 0..255}
+   */
   private static int parseUnsignedByte(
       Path specPath, XMLStreamReader reader, String attributeName, String value)
       throws BmsException {
@@ -436,6 +571,16 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Parses an integer attribute limited to the unsigned 64-bit range.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param attributeName attribute name used in diagnostics
+   * @param value raw attribute value text
+   * @return parsed value as {@link BigInteger}
+   * @throws BmsException if the value is outside {@code 0..2^64-1}
+   */
   private static BigInteger parseUnsignedLong(
       Path specPath, XMLStreamReader reader, String attributeName, String value)
       throws BmsException {
@@ -458,6 +603,16 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Parses a decimal attribute.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param attributeName attribute name used in diagnostics
+   * @param value raw attribute value text
+   * @return parsed decimal value
+   * @throws BmsException if the value is not a decimal number
+   */
   private static BigDecimal parseDecimal(
       Path specPath, XMLStreamReader reader, String attributeName, String value)
       throws BmsException {
@@ -472,6 +627,12 @@ public final class SpecParser {
     }
   }
 
+  /**
+   * Normalizes a QName-like string by removing any namespace prefix.
+   *
+   * @param qNameLiteral raw QName-like literal from XML
+   * @return local-name portion without prefix
+   */
   private static String normalizeQNameLiteral(String qNameLiteral) {
     String trimmed = qNameLiteral.trim();
     int colonIndex = trimmed.indexOf(':');
@@ -481,6 +642,15 @@ public final class SpecParser {
     return trimmed.substring(colonIndex + 1);
   }
 
+  /**
+   * Reads one required attribute and rejects missing/blank values.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param name required attribute name
+   * @return non-blank attribute value
+   * @throws BmsException if the attribute is missing or blank
+   */
   private static String requireAttribute(Path specPath, XMLStreamReader reader, String name)
       throws BmsException {
     String value = reader.getAttributeValue(null, name);
@@ -494,6 +664,14 @@ public final class SpecParser {
     return value;
   }
 
+  /**
+   * Creates an exception for an unsupported child element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param parentContext parent element name
+   * @return exception with one diagnostic
+   */
   private static BmsException unsupportedElement(
       Path specPath, XMLStreamReader reader, String parentContext) {
     return parserError(
@@ -507,6 +685,15 @@ public final class SpecParser {
             + "> in foundation v1.");
   }
 
+  /**
+   * Creates an exception at the reader's current location.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader
+   * @param code stable diagnostic code
+   * @param message human-readable diagnostic message
+   * @return exception with one diagnostic
+   */
   private static BmsException parserError(
       Path specPath, XMLStreamReader reader, String code, String message) {
     return singleDiagnosticException(
@@ -517,6 +704,16 @@ public final class SpecParser {
         reader.getLocation().getColumnNumber());
   }
 
+  /**
+   * Creates an exception that contains exactly one diagnostic.
+   *
+   * @param code stable diagnostic code
+   * @param message human-readable diagnostic message
+   * @param specPath source file path used in diagnostics
+   * @param line 1-based line number, or negative when unknown
+   * @param column 1-based column number, or negative when unknown
+   * @return exception with one diagnostic
+   */
   private static BmsException singleDiagnosticException(
       String code, String message, Path specPath, int line, int column) {
     Diagnostic diagnostic =

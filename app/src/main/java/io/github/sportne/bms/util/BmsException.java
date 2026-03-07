@@ -14,7 +14,12 @@ public final class BmsException extends Exception {
 
   private final List<Diagnostic> diagnostics;
 
-  /** Creates an exception with a human-readable summary and detailed diagnostics. */
+  /**
+   * Creates an exception with a human-readable summary and detailed diagnostics.
+   *
+   * @param message short summary shown at the top of CLI output
+   * @param diagnostics detailed warnings/errors collected during processing
+   */
   public BmsException(String message, List<Diagnostic> diagnostics) {
     super(Objects.requireNonNull(message, "message"));
     this.diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));

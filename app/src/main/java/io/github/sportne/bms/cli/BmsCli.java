@@ -28,6 +28,11 @@ public final class BmsCli {
   private static final int EXIT_USAGE_ERROR = 2;
   private static final int EXIT_INTERNAL_ERROR = 3;
 
+  /**
+   * Process entry point for command-line execution.
+   *
+   * @param args command-line arguments passed by the OS shell
+   */
   public static void main(String[] args) {
     int exitCode = new BmsCli().run(args, System.out, System.err);
     if (exitCode != EXIT_SUCCESS) {
@@ -39,6 +44,11 @@ public final class BmsCli {
    * Runs the CLI without calling {@link System#exit(int)}.
    *
    * <p>This makes it easy to test CLI behavior in unit tests.
+   *
+   * @param args command-line arguments (for example {@code validate spec.xml})
+   * @param out destination stream for normal output
+   * @param err destination stream for error output
+   * @return exit code that the process would use
    */
   public int run(String[] args, PrintStream out, PrintStream err) {
     Objects.requireNonNull(args, "args");
@@ -69,6 +79,15 @@ public final class BmsCli {
     }
   }
 
+  /**
+   * Handles the {@code validate} sub-command.
+   *
+   * @param args full CLI argument array
+   * @param out destination stream for normal output
+   * @param err destination stream for error output
+   * @return process-style exit code
+   * @throws BmsException if spec validation fails
+   */
   private static int runValidate(String[] args, PrintStream out, PrintStream err)
       throws BmsException {
     if (args.length != 2) {
@@ -84,6 +103,15 @@ public final class BmsCli {
     return EXIT_SUCCESS;
   }
 
+  /**
+   * Handles the {@code generate} sub-command.
+   *
+   * @param args full CLI argument array
+   * @param out destination stream for normal output
+   * @param err destination stream for error output
+   * @return process-style exit code
+   * @throws BmsException if validation or generation fails
+   */
   private static int runGenerate(String[] args, PrintStream out, PrintStream err)
       throws BmsException {
     if (args.length < 4) {
@@ -137,6 +165,12 @@ public final class BmsCli {
     return EXIT_SUCCESS;
   }
 
+  /**
+   * Prints an exception summary followed by each diagnostic line.
+   *
+   * @param err destination stream for error output
+   * @param exception compiler exception that contains diagnostics
+   */
   private static void printDiagnostics(PrintStream err, BmsException exception) {
     err.println(exception.getMessage());
     for (Diagnostic diagnostic : exception.diagnostics()) {
@@ -144,6 +178,11 @@ public final class BmsCli {
     }
   }
 
+  /**
+   * Prints short command usage text.
+   *
+   * @param out destination stream for usage output
+   */
   private static void printUsage(PrintStream out) {
     out.println("Usage:");
     out.println("  bms validate <spec.xml>");
