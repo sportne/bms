@@ -1,7 +1,6 @@
 package io.github.sportne.bms.codegen.java;
 
 import io.github.sportne.bms.model.Endian;
-import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.MessageTypeRef;
 import io.github.sportne.bms.model.resolved.PrimitiveType;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
@@ -10,7 +9,6 @@ import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
-import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
 import io.github.sportne.bms.util.DiagnosticSeverity;
@@ -93,7 +91,8 @@ public final class JavaCodeGenerator {
         continue;
       }
 
-      if (field.typeRef() instanceof FloatTypeRef || field.typeRef() instanceof ScaledIntTypeRef) {
+      if (!(field.typeRef() instanceof PrimitiveTypeRef)
+          && !(field.typeRef() instanceof MessageTypeRef)) {
         diagnostics.add(
             new Diagnostic(
                 DiagnosticSeverity.ERROR,

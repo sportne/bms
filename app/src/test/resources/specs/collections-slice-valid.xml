@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.collections">
+  <array name="BytePair" elementType="uint8" length="2" comment="Two-byte reusable array"/>
+  <vector name="ByteStream" elementType="uint8" comment="Reusable counted vector">
+    <countField ref="lengthField"/>
+  </vector>
+  <vector name="PathVector" elementType="uint8" comment="Reusable path-terminated vector">
+    <terminatorField name="root">
+      <terminatorField name="child">
+        <terminatorMatch value="FF"/>
+      </terminatorField>
+    </terminatorField>
+  </vector>
+  <blobArray name="Signature" length="16" comment="Reusable signature bytes"/>
+  <blobVector name="PayloadBlob" comment="Reusable terminated payload">
+    <terminatorValue value="00"/>
+  </blobVector>
+
+  <messageType name="CollectionFrame" comment="Message that uses collection constructs">
+    <field name="count" type="uint16" comment="Element count"/>
+    <field name="blobCount" type="uint8" comment="Blob count"/>
+    <array name="samples" elementType="uint8" length="4" comment="Inline fixed collection"/>
+    <vector name="events" elementType="uint8" comment="Inline counted vector">
+      <countField ref="count"/>
+    </vector>
+    <blobArray name="hash" length="8" comment="Inline hash bytes"/>
+    <blobVector name="payload" comment="Inline counted blob vector">
+      <countField ref="blobCount"/>
+    </blobVector>
+    <vector name="pathData" elementType="uint8" comment="Inline path-terminated vector">
+      <terminatorField name="outer">
+        <terminatorField name="inner">
+          <terminatorMatch value="0x00"/>
+        </terminatorField>
+      </terminatorField>
+    </vector>
+    <field name="reusableArrayField" type="BytePair" comment="Field that uses reusable array type"/>
+    <field name="reusableVectorField" type="ByteStream" comment="Field that uses reusable vector type"/>
+    <field name="reusableBlobArrayField" type="Signature" comment="Field that uses reusable blobArray type"/>
+    <field name="reusableBlobVectorField" type="PayloadBlob" comment="Field that uses reusable blobVector type"/>
+  </messageType>
+</schema>

@@ -61,6 +61,15 @@ class SpecValidatorTest {
     validator.validateOrThrow(specPath);
   }
 
+  /** Contract: collection + terminator slice elements are valid at the XSD layer. */
+  @Test
+  void collectionSliceSpecPassesXsdValidation() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = TestSupport.resourcePath("specs/collections-slice-valid.xml");
+
+    validator.validateOrThrow(specPath);
+  }
+
   /** Contract: bitField now requires a `name` attribute by XSD contract. */
   @Test
   void missingBitFieldNameFailsXsdValidation() throws Exception {

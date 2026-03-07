@@ -68,6 +68,26 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` succeeds for the collection + terminator front-end slice. */
+  void validateCommandReturnsSuccessForCollectionSliceSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate", TestSupport.resourcePath("specs/collections-slice-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
     BmsCli cli = new BmsCli();
@@ -111,6 +131,37 @@ class BmsCliTest {
         stderrBuffer
             .toString(StandardCharsets.UTF_8)
             .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  @Test
+  /** Contract: collection members and collection type refs fail with explicit diagnostics. */
+  void generateCommandReturnsSpecErrorForUnsupportedCollectionMembers() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-collections");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/collections-slice-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF"));
   }
 
   @Test

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
   <messageType name="TelemetryFrame" comment="Telemetry frame">
-    <vector name="samples" elementType="uint8" comment="Unsupported in parser slice">
-      <countField ref="sampleCount"/>
-    </vector>
+    <if test="version == 1">
+      <field name="payloadLength" type="uint16" comment="Conditional length"/>
+    </if>
   </messageType>
 </schema>

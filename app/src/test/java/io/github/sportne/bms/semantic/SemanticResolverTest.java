@@ -8,17 +8,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBitFlag;
 import io.github.sportne.bms.model.parsed.ParsedBitSegment;
 import io.github.sportne.bms.model.parsed.ParsedBitVariant;
+import io.github.sportne.bms.model.parsed.ParsedBlobArray;
+import io.github.sportne.bms.model.parsed.ParsedBlobVector;
+import io.github.sportne.bms.model.parsed.ParsedCountFieldLength;
 import io.github.sportne.bms.model.parsed.ParsedField;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedLengthMode;
 import io.github.sportne.bms.model.parsed.ParsedMessageType;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
+import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
+import io.github.sportne.bms.model.parsed.ParsedTerminatorValueLength;
+import io.github.sportne.bms.model.parsed.ParsedVector;
+import io.github.sportne.bms.model.resolved.ArrayTypeRef;
+import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
+import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
 import io.github.sportne.bms.model.resolved.FloatTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
+import io.github.sportne.bms.model.resolved.VectorTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -404,5 +417,204 @@ class SemanticResolverTest {
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_FLOAT_SCALE")));
+  }
+
+  /** Contract: collection definitions and collection type refs resolve in the front-end layer. */
+  @Test
+  void semanticResolverResolvesCollectionTypeReferences() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "CollectionFrame",
+                    "collection frame",
+                    null,
+                    List.of(
+                        new ParsedField("count", "uint16", null, null, null, "count"),
+                        new ParsedArray("samples", "uint8", 4, null, "inline array"),
+                        new ParsedVector(
+                            "events",
+                            "uint8",
+                            null,
+                            "inline counted vector",
+                            new ParsedCountFieldLength("count")),
+                        new ParsedBlobArray("hash", 8, "inline blob array"),
+                        new ParsedBlobVector(
+                            "payload", "inline blob vector", new ParsedTerminatorValueLength("00")),
+                        new ParsedField("reusableArray", "ReusableArray", null, null, null, "a"),
+                        new ParsedField("reusableVector", "ReusableVector", null, null, null, "v"),
+                        new ParsedField(
+                            "reusableBlobArray", "ReusableBlobArray", null, null, null, "ba"),
+                        new ParsedField(
+                            "reusableBlobVector", "ReusableBlobVector", null, null, null, "bv")))),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(new ParsedArray("ReusableArray", "uint8", 2, null, "Reusable array")),
+            List.of(
+                new ParsedVector(
+                    "ReusableVector",
+                    "uint8",
+                    null,
+                    "Reusable vector",
+                    new ParsedCountFieldLength("futureCount"))),
+            List.of(new ParsedBlobArray("ReusableBlobArray", 16, "Reusable blob array")),
+            List.of(
+                new ParsedBlobVector(
+                    "ReusableBlobVector",
+                    "Reusable blob vector",
+                    new ParsedTerminatorValueLength("FF"))));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+    var frame = resolved.messageTypes().get(0);
+
+    assertEquals(1, resolved.reusableArrays().size());
+    assertEquals(1, resolved.reusableVectors().size());
+    assertEquals(1, resolved.reusableBlobArrays().size());
+    assertEquals(1, resolved.reusableBlobVectors().size());
+
+    var fieldByName =
+        frame.fields().stream()
+            .collect(java.util.stream.Collectors.toMap(field -> field.name(), field -> field));
+    assertInstanceOf(ArrayTypeRef.class, fieldByName.get("reusableArray").typeRef());
+    assertInstanceOf(VectorTypeRef.class, fieldByName.get("reusableVector").typeRef());
+    assertInstanceOf(BlobArrayTypeRef.class, fieldByName.get("reusableBlobArray").typeRef());
+    assertInstanceOf(BlobVectorTypeRef.class, fieldByName.get("reusableBlobVector").typeRef());
+  }
+
+  /** Contract: message-level countField refs must target earlier primitive scalar fields. */
+  @Test
+  void semanticResolverRejectsVectorCountFieldRefToLaterField() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "CollectionFrame",
+                    "collection frame",
+                    null,
+                    List.of(
+                        new ParsedVector(
+                            "events",
+                            "uint8",
+                            null,
+                            "inline counted vector",
+                            new ParsedCountFieldLength("count")),
+                        new ParsedField("count", "uint16", null, null, null, "count")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_COUNT_FIELD_REF")));
+  }
+
+  /** Contract: reusable vector countField refs are syntax-only checks in this milestone. */
+  @Test
+  void semanticResolverAllowsReusableVectorCountFieldSyntaxOnlyRef() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new ParsedVector(
+                    "ReusableVector",
+                    "uint8",
+                    null,
+                    "Reusable vector",
+                    new ParsedCountFieldLength("futureCount"))),
+            List.of(),
+            List.of());
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+
+    assertEquals(1, resolved.reusableVectors().size());
+    ParsedLengthMode parsedMode = parsedSchema.reusableVectors().get(0).lengthMode();
+    assertInstanceOf(ParsedCountFieldLength.class, parsedMode);
+    assertInstanceOf(
+        ResolvedCountFieldLength.class, resolved.reusableVectors().get(0).lengthMode());
+  }
+
+  /** Contract: terminatorField paths must end with a terminatorMatch leaf. */
+  @Test
+  void semanticResolverRejectsTerminatorFieldPathWithoutMatchLeaf() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "CollectionFrame",
+                    "collection frame",
+                    null,
+                    List.of(
+                        new ParsedVector(
+                            "pathData",
+                            "uint8",
+                            null,
+                            "path vector",
+                            new ParsedTerminatorField(
+                                "outer", new ParsedTerminatorField("inner", null)))))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_TERMINATOR_FIELD_PATH")));
+  }
+
+  /** Contract: top-level names are unique even when arrays share a field's name. */
+  @Test
+  void semanticResolverRejectsDuplicateTopLevelNameBetweenFieldAndArray() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "CollectionFrame",
+                    "collection frame",
+                    null,
+                    List.of(
+                        new ParsedField("payload", "uint8", null, null, null, "payload field"),
+                        new ParsedArray("payload", "uint8", 4, null, "payload array")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_DUPLICATE_MEMBER_NAME")));
+  }
+
+  /** Contract: unknown collection element types fail with the standard unknown-type diagnostic. */
+  @Test
+  void semanticResolverRejectsUnknownCollectionElementType() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "CollectionFrame",
+                    "collection frame",
+                    null,
+                    List.of(new ParsedArray("samples", "MissingElement", 4, null, "samples")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_UNKNOWN_TYPE")));
   }
 }

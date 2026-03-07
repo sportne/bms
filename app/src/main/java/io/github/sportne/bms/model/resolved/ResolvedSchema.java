@@ -13,13 +13,21 @@ import java.util.Objects;
  * @param reusableBitFields schema-level reusable bitfield definitions
  * @param reusableFloats schema-level reusable float definitions
  * @param reusableScaledInts schema-level reusable scaled-int definitions
+ * @param reusableArrays schema-level reusable array definitions
+ * @param reusableVectors schema-level reusable vector definitions
+ * @param reusableBlobArrays schema-level reusable blob-array definitions
+ * @param reusableBlobVectors schema-level reusable blob-vector definitions
  */
 public record ResolvedSchema(
     String namespace,
     List<ResolvedMessageType> messageTypes,
     List<ResolvedBitField> reusableBitFields,
     List<ResolvedFloat> reusableFloats,
-    List<ResolvedScaledInt> reusableScaledInts) {
+    List<ResolvedScaledInt> reusableScaledInts,
+    List<ResolvedArray> reusableArrays,
+    List<ResolvedVector> reusableVectors,
+    List<ResolvedBlobArray> reusableBlobArrays,
+    List<ResolvedBlobVector> reusableBlobVectors) {
   /**
    * Creates a resolved schema object.
    *
@@ -28,6 +36,10 @@ public record ResolvedSchema(
    * @param reusableBitFields resolved reusable bitfields
    * @param reusableFloats resolved reusable floats
    * @param reusableScaledInts resolved reusable scaled ints
+   * @param reusableArrays resolved reusable arrays
+   * @param reusableVectors resolved reusable vectors
+   * @param reusableBlobArrays resolved reusable blob arrays
+   * @param reusableBlobVectors resolved reusable blob vectors
    */
   public ResolvedSchema {
     namespace = Objects.requireNonNull(namespace, "namespace");
@@ -36,6 +48,12 @@ public record ResolvedSchema(
     reusableFloats = List.copyOf(Objects.requireNonNull(reusableFloats, "reusableFloats"));
     reusableScaledInts =
         List.copyOf(Objects.requireNonNull(reusableScaledInts, "reusableScaledInts"));
+    reusableArrays = List.copyOf(Objects.requireNonNull(reusableArrays, "reusableArrays"));
+    reusableVectors = List.copyOf(Objects.requireNonNull(reusableVectors, "reusableVectors"));
+    reusableBlobArrays =
+        List.copyOf(Objects.requireNonNull(reusableBlobArrays, "reusableBlobArrays"));
+    reusableBlobVectors =
+        List.copyOf(Objects.requireNonNull(reusableBlobVectors, "reusableBlobVectors"));
   }
 
   /**
@@ -47,6 +65,42 @@ public record ResolvedSchema(
    * @param messageTypes resolved message type definitions
    */
   public ResolvedSchema(String namespace, List<ResolvedMessageType> messageTypes) {
-    this(namespace, messageTypes, List.of(), List.of(), List.of());
+    this(
+        namespace,
+        messageTypes,
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of());
+  }
+
+  /**
+   * Convenience constructor for call sites that do not pass collection definitions yet.
+   *
+   * @param namespace schema-level logical namespace
+   * @param messageTypes resolved message type definitions
+   * @param reusableBitFields schema-level reusable bitfield definitions
+   * @param reusableFloats schema-level reusable float definitions
+   * @param reusableScaledInts schema-level reusable scaled-int definitions
+   */
+  public ResolvedSchema(
+      String namespace,
+      List<ResolvedMessageType> messageTypes,
+      List<ResolvedBitField> reusableBitFields,
+      List<ResolvedFloat> reusableFloats,
+      List<ResolvedScaledInt> reusableScaledInts) {
+    this(
+        namespace,
+        messageTypes,
+        reusableBitFields,
+        reusableFloats,
+        reusableScaledInts,
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of());
   }
 }

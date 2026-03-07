@@ -7,10 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.MessageTypeRef;
 import io.github.sportne.bms.model.resolved.PrimitiveType;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedArray;
 import io.github.sportne.bms.model.resolved.ResolvedBitField;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
@@ -103,6 +105,56 @@ class JavaCodeGeneratorTest {
                     new BigDecimal("0.1"),
                     null,
                     "Reusable scaled int")));
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF")));
+  }
+
+  /** Contract: collection member kinds and collection type refs fail with explicit diagnostics. */
+  @Test
+  void javaGeneratorFailsWithClearDiagnosticsForUnsupportedCollectionMembers() {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedMessageType messageType =
+        new ResolvedMessageType(
+            "Collections",
+            "Collection message",
+            "acme.telemetry",
+            List.of(
+                new ResolvedArray(
+                    "samples", new PrimitiveTypeRef(PrimitiveType.UINT8), 4, null, "Inline array"),
+                new ResolvedField(
+                    "reusableArray",
+                    new ArrayTypeRef("BytePair"),
+                    null,
+                    null,
+                    null,
+                    "Field that references reusable array")));
+
+    ResolvedSchema schema =
+        new ResolvedSchema(
+            "acme.telemetry",
+            List.of(messageType),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new ResolvedArray(
+                    "BytePair",
+                    new PrimitiveTypeRef(PrimitiveType.UINT8),
+                    2,
+                    null,
+                    "Reusable array")),
+            List.of(),
+            List.of(),
+            List.of());
 
     BmsException exception =
         assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));

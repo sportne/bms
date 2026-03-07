@@ -6,4 +6,11 @@ package io.github.sportne.bms.model.resolved;
  * <p>Generators must respect the list order because message layout is order-sensitive.
  */
 public sealed interface ResolvedMessageMember
-    permits ResolvedField, ResolvedBitField, ResolvedFloat, ResolvedScaledInt {}
+    permits ResolvedField,
+        ResolvedBitField,
+        ResolvedFloat,
+        ResolvedScaledInt,
+        ResolvedArray,
+        ResolvedVector,
+        ResolvedBlobArray,
+        ResolvedBlobVector {}

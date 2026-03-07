@@ -6,4 +6,11 @@ package io.github.sportne.bms.model.resolved;
  * <p>After semantic resolution, every field points to one of these concrete reference kinds.
  */
 public sealed interface ResolvedTypeRef
-    permits PrimitiveTypeRef, MessageTypeRef, FloatTypeRef, ScaledIntTypeRef {}
+    permits PrimitiveTypeRef,
+        MessageTypeRef,
+        FloatTypeRef,
+        ScaledIntTypeRef,
+        ArrayTypeRef,
+        VectorTypeRef,
+        BlobArrayTypeRef,
+        BlobVectorTypeRef {}
