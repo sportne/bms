@@ -96,6 +96,7 @@ spotbugs {
 checkstyle {
 	toolVersion = '10.17.0'
 	configFile = rootProject.file('config/checkstyle/checkstyle.xml')
+	ignoreFailures = false
 }
 
 tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {

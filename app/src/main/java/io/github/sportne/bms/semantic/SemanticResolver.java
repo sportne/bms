@@ -86,186 +86,299 @@ public final class SemanticResolver {
    * @throws BmsException if one or more semantic errors are found
    */
   public ResolvedSchema resolve(ParsedSchema parsedSchema, String sourcePath) throws BmsException {
-    List<Diagnostic> diagnostics = new ArrayList<>();
-    validateNamespace(parsedSchema.namespace(), "schema@namespace", sourcePath, diagnostics);
+    ResolutionContext context = new ResolutionContext(sourcePath);
+    validateNamespace(
+        parsedSchema.namespace(), "schema@namespace", context.sourcePath, context.diagnostics);
+    registerSchemaLevelTypes(parsedSchema, context);
 
-    Map<String, ParsedMessageType> messageTypeByName = new LinkedHashMap<>();
-    Map<String, ParsedFloat> reusableFloatByName = new LinkedHashMap<>();
-    Map<String, ParsedScaledInt> reusableScaledIntByName = new LinkedHashMap<>();
-    Map<String, ParsedArray> reusableArrayByName = new LinkedHashMap<>();
-    Map<String, ParsedVector> reusableVectorByName = new LinkedHashMap<>();
-    Map<String, ParsedBlobArray> reusableBlobArrayByName = new LinkedHashMap<>();
-    Map<String, ParsedBlobVector> reusableBlobVectorByName = new LinkedHashMap<>();
-    Set<String> globalTypeNames = new HashSet<>();
+    ReusableResolution reusableResolution = resolveReusableDefinitions(parsedSchema, context);
+    List<ResolvedMessageType> resolvedMessageTypes =
+        resolveMessageTypes(parsedSchema.namespace(), parsedSchema.messageTypes(), context);
 
-    for (ParsedMessageType messageType : parsedSchema.messageTypes()) {
+    throwIfDiagnosticsContainErrors(context.diagnostics);
+    return new ResolvedSchema(
+        parsedSchema.namespace(),
+        resolvedMessageTypes,
+        reusableResolution.reusableBitFields(),
+        reusableResolution.reusableFloats(),
+        reusableResolution.reusableScaledInts(),
+        reusableResolution.reusableArrays(),
+        reusableResolution.reusableVectors(),
+        reusableResolution.reusableBlobArrays(),
+        reusableResolution.reusableBlobVectors());
+  }
+
+  /**
+   * Registers all schema-level named type definitions for reference lookup and duplicate checks.
+   *
+   * @param parsedSchema parsed schema produced by the parser
+   * @param context shared semantic-resolution state
+   */
+  private static void registerSchemaLevelTypes(
+      ParsedSchema parsedSchema, ResolutionContext context) {
+    registerMessageTypes(parsedSchema.messageTypes(), context);
+    registerReusableFloats(parsedSchema.reusableFloats(), context);
+    registerReusableScaledInts(parsedSchema.reusableScaledInts(), context);
+    registerReusableArrays(parsedSchema.reusableArrays(), context);
+    registerReusableVectors(parsedSchema.reusableVectors(), context);
+    registerReusableBlobArrays(parsedSchema.reusableBlobArrays(), context);
+    registerReusableBlobVectors(parsedSchema.reusableBlobVectors(), context);
+  }
+
+  /**
+   * Registers message-type names and validates message-specific metadata.
+   *
+   * @param messageTypes parsed message definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerMessageTypes(
+      List<ParsedMessageType> messageTypes, ResolutionContext context) {
+    for (ParsedMessageType messageType : messageTypes) {
       validateIdentifier(
           messageType.name(),
           "SEMANTIC_INVALID_MESSAGE_NAME",
           "Message type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (messageTypeByName.putIfAbsent(messageType.name(), messageType) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      if (context.messageTypeByName.putIfAbsent(messageType.name(), messageType) != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_MESSAGE_TYPE",
                 "Duplicate message type name: " + messageType.name(),
-                sourcePath));
+                context.sourcePath));
       }
-      if (!globalTypeNames.add(messageType.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + messageType.name(),
-                sourcePath));
-      }
+      registerGlobalTypeName(messageType.name(), context);
       if (messageType.namespaceOverride() != null) {
         validateNamespace(
-            messageType.namespaceOverride(), "messageType@namespace", sourcePath, diagnostics);
+            messageType.namespaceOverride(),
+            "messageType@namespace",
+            context.sourcePath,
+            context.diagnostics);
       }
     }
+  }
 
-    for (ParsedFloat parsedFloat : parsedSchema.reusableFloats()) {
+  /**
+   * Registers reusable float definitions and validates their type names.
+   *
+   * @param reusableFloats parsed reusable float definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableFloats(
+      List<ParsedFloat> reusableFloats, ResolutionContext context) {
+    for (ParsedFloat parsedFloat : reusableFloats) {
       validateIdentifier(
           parsedFloat.name(),
           "SEMANTIC_INVALID_FLOAT_NAME",
           "Float type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedFloat.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedFloat.name(),
-                sourcePath));
-      }
-      if (reusableFloatByName.putIfAbsent(parsedFloat.name(), parsedFloat) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedFloat.name(), context);
+      if (context.reusableFloatByName.putIfAbsent(parsedFloat.name(), parsedFloat) != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_FLOAT_TYPE",
                 "Duplicate reusable float name: " + parsedFloat.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
-    for (ParsedScaledInt parsedScaledInt : parsedSchema.reusableScaledInts()) {
+  /**
+   * Registers reusable scaled-int definitions and validates their type names.
+   *
+   * @param reusableScaledInts parsed reusable scaled-int definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableScaledInts(
+      List<ParsedScaledInt> reusableScaledInts, ResolutionContext context) {
+    for (ParsedScaledInt parsedScaledInt : reusableScaledInts) {
       validateIdentifier(
           parsedScaledInt.name(),
           "SEMANTIC_INVALID_SCALED_INT_NAME",
           "ScaledInt type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedScaledInt.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedScaledInt.name(),
-                sourcePath));
-      }
-      if (reusableScaledIntByName.putIfAbsent(parsedScaledInt.name(), parsedScaledInt) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedScaledInt.name(), context);
+      if (context.reusableScaledIntByName.putIfAbsent(parsedScaledInt.name(), parsedScaledInt)
+          != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_SCALED_INT_TYPE",
                 "Duplicate reusable scaledInt name: " + parsedScaledInt.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
-    for (ParsedArray parsedArray : parsedSchema.reusableArrays()) {
+  /**
+   * Registers reusable array definitions and validates their type names.
+   *
+   * @param reusableArrays parsed reusable array definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableArrays(
+      List<ParsedArray> reusableArrays, ResolutionContext context) {
+    for (ParsedArray parsedArray : reusableArrays) {
       validateIdentifier(
           parsedArray.name(),
           "SEMANTIC_INVALID_ARRAY_NAME",
           "Array type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedArray.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedArray.name(),
-                sourcePath));
-      }
-      if (reusableArrayByName.putIfAbsent(parsedArray.name(), parsedArray) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedArray.name(), context);
+      if (context.reusableArrayByName.putIfAbsent(parsedArray.name(), parsedArray) != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_ARRAY_TYPE",
                 "Duplicate reusable array name: " + parsedArray.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
-    for (ParsedVector parsedVector : parsedSchema.reusableVectors()) {
+  /**
+   * Registers reusable vector definitions and validates their type names.
+   *
+   * @param reusableVectors parsed reusable vector definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableVectors(
+      List<ParsedVector> reusableVectors, ResolutionContext context) {
+    for (ParsedVector parsedVector : reusableVectors) {
       validateIdentifier(
           parsedVector.name(),
           "SEMANTIC_INVALID_VECTOR_NAME",
           "Vector type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedVector.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedVector.name(),
-                sourcePath));
-      }
-      if (reusableVectorByName.putIfAbsent(parsedVector.name(), parsedVector) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedVector.name(), context);
+      if (context.reusableVectorByName.putIfAbsent(parsedVector.name(), parsedVector) != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_VECTOR_TYPE",
                 "Duplicate reusable vector name: " + parsedVector.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
-    for (ParsedBlobArray parsedBlobArray : parsedSchema.reusableBlobArrays()) {
+  /**
+   * Registers reusable blob-array definitions and validates their type names.
+   *
+   * @param reusableBlobArrays parsed reusable blob-array definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableBlobArrays(
+      List<ParsedBlobArray> reusableBlobArrays, ResolutionContext context) {
+    for (ParsedBlobArray parsedBlobArray : reusableBlobArrays) {
       validateIdentifier(
           parsedBlobArray.name(),
           "SEMANTIC_INVALID_BLOB_ARRAY_NAME",
           "blobArray type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedBlobArray.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedBlobArray.name(),
-                sourcePath));
-      }
-      if (reusableBlobArrayByName.putIfAbsent(parsedBlobArray.name(), parsedBlobArray) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedBlobArray.name(), context);
+      if (context.reusableBlobArrayByName.putIfAbsent(parsedBlobArray.name(), parsedBlobArray)
+          != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_BLOB_ARRAY_TYPE",
                 "Duplicate reusable blobArray name: " + parsedBlobArray.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
-    for (ParsedBlobVector parsedBlobVector : parsedSchema.reusableBlobVectors()) {
+  /**
+   * Registers reusable blob-vector definitions and validates their type names.
+   *
+   * @param reusableBlobVectors parsed reusable blob-vector definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableBlobVectors(
+      List<ParsedBlobVector> reusableBlobVectors, ResolutionContext context) {
+    for (ParsedBlobVector parsedBlobVector : reusableBlobVectors) {
       validateIdentifier(
           parsedBlobVector.name(),
           "SEMANTIC_INVALID_BLOB_VECTOR_NAME",
           "blobVector type name must be a valid identifier: ",
-          sourcePath,
-          diagnostics);
-      if (!globalTypeNames.add(parsedBlobVector.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_TYPE_NAME",
-                "Duplicate global type name: " + parsedBlobVector.name(),
-                sourcePath));
-      }
-      if (reusableBlobVectorByName.putIfAbsent(parsedBlobVector.name(), parsedBlobVector) != null) {
-        diagnostics.add(
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedBlobVector.name(), context);
+      if (context.reusableBlobVectorByName.putIfAbsent(parsedBlobVector.name(), parsedBlobVector)
+          != null) {
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_BLOB_VECTOR_TYPE",
                 "Duplicate reusable blobVector name: " + parsedBlobVector.name(),
-                sourcePath));
+                context.sourcePath));
       }
     }
+  }
 
+  /**
+   * Registers one type name in the schema-level global type set.
+   *
+   * @param typeName type name being registered
+   * @param context shared semantic-resolution state
+   */
+  private static void registerGlobalTypeName(String typeName, ResolutionContext context) {
+    if (!context.globalTypeNames.add(typeName)) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_DUPLICATE_TYPE_NAME",
+              "Duplicate global type name: " + typeName,
+              context.sourcePath));
+    }
+  }
+
+  /**
+   * Resolves all schema-level reusable definitions after registration.
+   *
+   * @param parsedSchema parsed schema produced by the parser
+   * @param context shared semantic-resolution state
+   * @return reusable-definition resolution result
+   */
+  private static ReusableResolution resolveReusableDefinitions(
+      ParsedSchema parsedSchema, ResolutionContext context) {
+    List<ResolvedFloat> resolvedReusableFloats =
+        resolveReusableFloats(parsedSchema.reusableFloats(), context);
+    List<ResolvedScaledInt> resolvedReusableScaledInts =
+        resolveReusableScaledInts(parsedSchema.reusableScaledInts(), context);
+    List<ResolvedArray> resolvedReusableArrays =
+        resolveReusableArrays(parsedSchema.reusableArrays(), context);
+    List<ResolvedVector> resolvedReusableVectors =
+        resolveReusableVectors(parsedSchema.reusableVectors(), context);
+    List<ResolvedBlobArray> resolvedReusableBlobArrays =
+        resolveReusableBlobArrays(parsedSchema.reusableBlobArrays());
+    List<ResolvedBlobVector> resolvedReusableBlobVectors =
+        resolveReusableBlobVectors(parsedSchema.reusableBlobVectors(), context);
+    List<ResolvedBitField> resolvedReusableBitFields =
+        resolveReusableBitFields(parsedSchema.reusableBitFields(), context);
+
+    return new ReusableResolution(
+        resolvedReusableBitFields,
+        resolvedReusableFloats,
+        resolvedReusableScaledInts,
+        resolvedReusableArrays,
+        resolvedReusableVectors,
+        resolvedReusableBlobArrays,
+        resolvedReusableBlobVectors);
+  }
+
+  /**
+   * Resolves reusable float definitions.
+   *
+   * @param reusableFloats parsed reusable float definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable floats
+   */
+  private static List<ResolvedFloat> resolveReusableFloats(
+      List<ParsedFloat> reusableFloats, ResolutionContext context) {
     List<ResolvedFloat> resolvedReusableFloats = new ArrayList<>();
-    for (ParsedFloat parsedFloat : parsedSchema.reusableFloats()) {
-      validateFloatScaleRules(parsedFloat, sourcePath, diagnostics);
+    for (ParsedFloat parsedFloat : reusableFloats) {
+      validateFloatScaleRules(parsedFloat, context.sourcePath, context.diagnostics);
       resolvedReusableFloats.add(
           new ResolvedFloat(
               parsedFloat.name(),
@@ -275,16 +388,27 @@ public final class SemanticResolver {
               parsedFloat.endian(),
               parsedFloat.comment()));
     }
+    return resolvedReusableFloats;
+  }
 
+  /**
+   * Resolves reusable scaled-int definitions.
+   *
+   * @param reusableScaledInts parsed reusable scaled-int definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable scaled ints
+   */
+  private static List<ResolvedScaledInt> resolveReusableScaledInts(
+      List<ParsedScaledInt> reusableScaledInts, ResolutionContext context) {
     List<ResolvedScaledInt> resolvedReusableScaledInts = new ArrayList<>();
-    for (ParsedScaledInt parsedScaledInt : parsedSchema.reusableScaledInts()) {
+    for (ParsedScaledInt parsedScaledInt : reusableScaledInts) {
       PrimitiveType baseType = PrimitiveType.fromSchemaName(parsedScaledInt.baseTypeName());
       if (baseType == null) {
-        diagnostics.add(
+        context.diagnostics.add(
             error(
                 "SEMANTIC_INVALID_SCALED_INT_BASE_TYPE",
                 "Invalid scaledInt baseType: " + parsedScaledInt.baseTypeName(),
-                sourcePath));
+                context.sourcePath));
         continue;
       }
       resolvedReusableScaledInts.add(
@@ -295,22 +419,23 @@ public final class SemanticResolver {
               parsedScaledInt.endian(),
               parsedScaledInt.comment()));
     }
+    return resolvedReusableScaledInts;
+  }
 
+  /**
+   * Resolves reusable array definitions.
+   *
+   * @param reusableArrays parsed reusable array definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable arrays
+   */
+  private static List<ResolvedArray> resolveReusableArrays(
+      List<ParsedArray> reusableArrays, ResolutionContext context) {
     List<ResolvedArray> resolvedReusableArrays = new ArrayList<>();
-    for (ParsedArray parsedArray : parsedSchema.reusableArrays()) {
+    for (ParsedArray parsedArray : reusableArrays) {
       ResolvedTypeRef elementTypeRef =
           resolveTypeRef(
-              parsedArray.elementTypeName(),
-              "reusable array " + parsedArray.name(),
-              messageTypeByName,
-              reusableFloatByName,
-              reusableScaledIntByName,
-              reusableArrayByName,
-              reusableVectorByName,
-              reusableBlobArrayByName,
-              reusableBlobVectorByName,
-              sourcePath,
-              diagnostics);
+              parsedArray.elementTypeName(), "reusable array " + parsedArray.name(), context);
       if (elementTypeRef == null) {
         continue;
       }
@@ -322,28 +447,29 @@ public final class SemanticResolver {
               parsedArray.endian(),
               parsedArray.comment()));
     }
+    return resolvedReusableArrays;
+  }
 
+  /**
+   * Resolves reusable vector definitions.
+   *
+   * @param reusableVectors parsed reusable vector definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable vectors
+   */
+  private static List<ResolvedVector> resolveReusableVectors(
+      List<ParsedVector> reusableVectors, ResolutionContext context) {
     List<ResolvedVector> resolvedReusableVectors = new ArrayList<>();
-    for (ParsedVector parsedVector : parsedSchema.reusableVectors()) {
+    for (ParsedVector parsedVector : reusableVectors) {
       ResolvedTypeRef elementTypeRef =
           resolveTypeRef(
-              parsedVector.elementTypeName(),
-              "reusable vector " + parsedVector.name(),
-              messageTypeByName,
-              reusableFloatByName,
-              reusableScaledIntByName,
-              reusableArrayByName,
-              reusableVectorByName,
-              reusableBlobArrayByName,
-              reusableBlobVectorByName,
-              sourcePath,
-              diagnostics);
+              parsedVector.elementTypeName(), "reusable vector " + parsedVector.name(), context);
       ResolvedLengthMode lengthMode =
           resolveLengthMode(
               parsedVector.lengthMode(),
               "reusable vector " + parsedVector.name(),
-              sourcePath,
-              diagnostics,
+              context.sourcePath,
+              context.diagnostics,
               Collections.emptySet(),
               false,
               true);
@@ -358,22 +484,43 @@ public final class SemanticResolver {
               parsedVector.comment(),
               lengthMode));
     }
+    return resolvedReusableVectors;
+  }
 
+  /**
+   * Resolves reusable blob-array definitions.
+   *
+   * @param reusableBlobArrays parsed reusable blob-array definitions
+   * @return resolved reusable blob arrays
+   */
+  private static List<ResolvedBlobArray> resolveReusableBlobArrays(
+      List<ParsedBlobArray> reusableBlobArrays) {
     List<ResolvedBlobArray> resolvedReusableBlobArrays = new ArrayList<>();
-    for (ParsedBlobArray parsedBlobArray : parsedSchema.reusableBlobArrays()) {
+    for (ParsedBlobArray parsedBlobArray : reusableBlobArrays) {
       resolvedReusableBlobArrays.add(
           new ResolvedBlobArray(
               parsedBlobArray.name(), parsedBlobArray.length(), parsedBlobArray.comment()));
     }
+    return resolvedReusableBlobArrays;
+  }
 
+  /**
+   * Resolves reusable blob-vector definitions.
+   *
+   * @param reusableBlobVectors parsed reusable blob-vector definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable blob vectors
+   */
+  private static List<ResolvedBlobVector> resolveReusableBlobVectors(
+      List<ParsedBlobVector> reusableBlobVectors, ResolutionContext context) {
     List<ResolvedBlobVector> resolvedReusableBlobVectors = new ArrayList<>();
-    for (ParsedBlobVector parsedBlobVector : parsedSchema.reusableBlobVectors()) {
+    for (ParsedBlobVector parsedBlobVector : reusableBlobVectors) {
       ResolvedLengthMode lengthMode =
           resolveLengthMode(
               parsedBlobVector.lengthMode(),
               "reusable blobVector " + parsedBlobVector.name(),
-              sourcePath,
-              diagnostics,
+              context.sourcePath,
+              context.diagnostics,
               Collections.emptySet(),
               false,
               false);
@@ -383,352 +530,452 @@ public final class SemanticResolver {
       resolvedReusableBlobVectors.add(
           new ResolvedBlobVector(parsedBlobVector.name(), parsedBlobVector.comment(), lengthMode));
     }
+    return resolvedReusableBlobVectors;
+  }
 
+  /**
+   * Resolves reusable bitfield definitions and enforces unique schema-level bitfield names.
+   *
+   * @param reusableBitFields parsed reusable bitfield definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable bitfields
+   */
+  private static List<ResolvedBitField> resolveReusableBitFields(
+      List<ParsedBitField> reusableBitFields, ResolutionContext context) {
     Set<String> reusableBitFieldNames = new HashSet<>();
     List<ResolvedBitField> resolvedReusableBitFields = new ArrayList<>();
-    for (ParsedBitField parsedBitField : parsedSchema.reusableBitFields()) {
+    for (ParsedBitField parsedBitField : reusableBitFields) {
       if (!reusableBitFieldNames.add(parsedBitField.name())) {
-        diagnostics.add(
+        context.diagnostics.add(
             error(
                 "SEMANTIC_DUPLICATE_ROOT_BIT_FIELD_NAME",
                 "Duplicate schema-level bitField name: " + parsedBitField.name(),
-                sourcePath));
+                context.sourcePath));
       }
-      resolvedReusableBitFields.add(resolveBitField(parsedBitField, sourcePath, diagnostics));
+      resolvedReusableBitFields.add(
+          resolveBitField(parsedBitField, context.sourcePath, context.diagnostics));
     }
+    return resolvedReusableBitFields;
+  }
 
+  /**
+   * Resolves all message types and their members.
+   *
+   * @param schemaNamespace schema-level namespace value
+   * @param messageTypes parsed message definitions
+   * @param context shared semantic-resolution state
+   * @return resolved message definitions
+   */
+  private static List<ResolvedMessageType> resolveMessageTypes(
+      String schemaNamespace, List<ParsedMessageType> messageTypes, ResolutionContext context) {
     List<ResolvedMessageType> resolvedMessageTypes = new ArrayList<>();
-    for (ParsedMessageType parsedMessageType : parsedSchema.messageTypes()) {
-      String effectiveNamespace =
-          parsedMessageType.namespaceOverride() == null
-              ? parsedSchema.namespace()
-              : parsedMessageType.namespaceOverride();
+    for (ParsedMessageType parsedMessageType : messageTypes) {
+      resolvedMessageTypes.add(resolveMessageType(schemaNamespace, parsedMessageType, context));
+    }
+    return resolvedMessageTypes;
+  }
 
-      Set<String> namedMembers = new HashSet<>();
-      Set<String> previousPrimitiveFieldNames = new HashSet<>();
-      List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
-      for (ParsedMessageMember member : parsedMessageType.members()) {
-        if (member instanceof ParsedField parsedField) {
-          validateIdentifier(
-              parsedField.name(),
-              "SEMANTIC_INVALID_FIELD_NAME",
-              "Field name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedField.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_FIELD_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedField.name(),
-                    sourcePath));
-          }
+  /**
+   * Resolves one message type and preserves member declaration order.
+   *
+   * @param schemaNamespace schema-level namespace value
+   * @param parsedMessageType parsed message type definition
+   * @param context shared semantic-resolution state
+   * @return resolved message type
+   */
+  private static ResolvedMessageType resolveMessageType(
+      String schemaNamespace, ParsedMessageType parsedMessageType, ResolutionContext context) {
+    String effectiveNamespace =
+        parsedMessageType.namespaceOverride() == null
+            ? schemaNamespace
+            : parsedMessageType.namespaceOverride();
 
-          ResolvedTypeRef typeRef =
-              resolveTypeRef(
-                  parsedField.typeName(),
-                  parsedMessageType.name(),
-                  messageTypeByName,
-                  reusableFloatByName,
-                  reusableScaledIntByName,
-                  reusableArrayByName,
-                  reusableVectorByName,
-                  reusableBlobArrayByName,
-                  reusableBlobVectorByName,
-                  sourcePath,
-                  diagnostics);
-          if (typeRef == null) {
-            continue;
-          }
-
-          resolvedMembers.add(
-              new ResolvedField(
-                  parsedField.name(),
-                  typeRef,
-                  parsedField.length(),
-                  parsedField.endian(),
-                  parsedField.fixed(),
-                  parsedField.comment()));
-          if (typeRef instanceof PrimitiveTypeRef) {
-            previousPrimitiveFieldNames.add(parsedField.name());
-          }
-          continue;
-        }
-
-        if (member instanceof ParsedBitField parsedBitField) {
-          if (!namedMembers.add(parsedBitField.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedBitField.name(),
-                    sourcePath));
-          }
-          resolvedMembers.add(resolveBitField(parsedBitField, sourcePath, diagnostics));
-          continue;
-        }
-
-        if (member instanceof ParsedFloat parsedFloat) {
-          validateIdentifier(
-              parsedFloat.name(),
-              "SEMANTIC_INVALID_FLOAT_NAME",
-              "Float name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedFloat.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedFloat.name(),
-                    sourcePath));
-          }
-          validateFloatScaleRules(parsedFloat, sourcePath, diagnostics);
-          resolvedMembers.add(
-              new ResolvedFloat(
-                  parsedFloat.name(),
-                  parsedFloat.size(),
-                  parsedFloat.encoding(),
-                  parsedFloat.scale(),
-                  parsedFloat.endian(),
-                  parsedFloat.comment()));
-          continue;
-        }
-
-        if (member instanceof ParsedScaledInt parsedScaledInt) {
-          validateIdentifier(
-              parsedScaledInt.name(),
-              "SEMANTIC_INVALID_SCALED_INT_NAME",
-              "ScaledInt name must be a valid identifier in message "
-                  + parsedMessageType.name()
-                  + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedScaledInt.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedScaledInt.name(),
-                    sourcePath));
-          }
-
-          PrimitiveType baseType = PrimitiveType.fromSchemaName(parsedScaledInt.baseTypeName());
-          if (baseType == null) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_INVALID_SCALED_INT_BASE_TYPE",
-                    "Invalid scaledInt baseType in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedScaledInt.baseTypeName(),
-                    sourcePath));
-            continue;
-          }
-
-          resolvedMembers.add(
-              new ResolvedScaledInt(
-                  parsedScaledInt.name(),
-                  baseType,
-                  parsedScaledInt.scale(),
-                  parsedScaledInt.endian(),
-                  parsedScaledInt.comment()));
-          continue;
-        }
-
-        if (member instanceof ParsedArray parsedArray) {
-          validateIdentifier(
-              parsedArray.name(),
-              "SEMANTIC_INVALID_ARRAY_NAME",
-              "Array name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedArray.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedArray.name(),
-                    sourcePath));
-          }
-
-          ResolvedTypeRef elementTypeRef =
-              resolveTypeRef(
-                  parsedArray.elementTypeName(),
-                  "array " + parsedArray.name() + " in message " + parsedMessageType.name(),
-                  messageTypeByName,
-                  reusableFloatByName,
-                  reusableScaledIntByName,
-                  reusableArrayByName,
-                  reusableVectorByName,
-                  reusableBlobArrayByName,
-                  reusableBlobVectorByName,
-                  sourcePath,
-                  diagnostics);
-          if (elementTypeRef == null) {
-            continue;
-          }
-
-          resolvedMembers.add(
-              new ResolvedArray(
-                  parsedArray.name(),
-                  elementTypeRef,
-                  parsedArray.length(),
-                  parsedArray.endian(),
-                  parsedArray.comment()));
-          continue;
-        }
-
-        if (member instanceof ParsedVector parsedVector) {
-          validateIdentifier(
-              parsedVector.name(),
-              "SEMANTIC_INVALID_VECTOR_NAME",
-              "Vector name must be a valid identifier in message "
-                  + parsedMessageType.name()
-                  + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedVector.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedVector.name(),
-                    sourcePath));
-          }
-
-          ResolvedTypeRef elementTypeRef =
-              resolveTypeRef(
-                  parsedVector.elementTypeName(),
-                  "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
-                  messageTypeByName,
-                  reusableFloatByName,
-                  reusableScaledIntByName,
-                  reusableArrayByName,
-                  reusableVectorByName,
-                  reusableBlobArrayByName,
-                  reusableBlobVectorByName,
-                  sourcePath,
-                  diagnostics);
-          ResolvedLengthMode lengthMode =
-              resolveLengthMode(
-                  parsedVector.lengthMode(),
-                  "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
-                  sourcePath,
-                  diagnostics,
-                  previousPrimitiveFieldNames,
-                  true,
-                  true);
-          if (elementTypeRef == null || lengthMode == null) {
-            continue;
-          }
-
-          resolvedMembers.add(
-              new ResolvedVector(
-                  parsedVector.name(),
-                  elementTypeRef,
-                  parsedVector.endian(),
-                  parsedVector.comment(),
-                  lengthMode));
-          continue;
-        }
-
-        if (member instanceof ParsedBlobArray parsedBlobArray) {
-          validateIdentifier(
-              parsedBlobArray.name(),
-              "SEMANTIC_INVALID_BLOB_ARRAY_NAME",
-              "blobArray name must be a valid identifier in message "
-                  + parsedMessageType.name()
-                  + ": ",
-              sourcePath,
-              diagnostics);
-          if (!namedMembers.add(parsedBlobArray.name())) {
-            diagnostics.add(
-                error(
-                    "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                    "Duplicate member name in message "
-                        + parsedMessageType.name()
-                        + ": "
-                        + parsedBlobArray.name(),
-                    sourcePath));
-          }
-          resolvedMembers.add(
-              new ResolvedBlobArray(
-                  parsedBlobArray.name(), parsedBlobArray.length(), parsedBlobArray.comment()));
-          continue;
-        }
-
-        ParsedBlobVector parsedBlobVector = (ParsedBlobVector) member;
-        validateIdentifier(
-            parsedBlobVector.name(),
-            "SEMANTIC_INVALID_BLOB_VECTOR_NAME",
-            "blobVector name must be a valid identifier in message "
-                + parsedMessageType.name()
-                + ": ",
-            sourcePath,
-            diagnostics);
-        if (!namedMembers.add(parsedBlobVector.name())) {
-          diagnostics.add(
-              error(
-                  "SEMANTIC_DUPLICATE_MEMBER_NAME",
-                  "Duplicate member name in message "
-                      + parsedMessageType.name()
-                      + ": "
-                      + parsedBlobVector.name(),
-                  sourcePath));
-        }
-
-        ResolvedLengthMode lengthMode =
-            resolveLengthMode(
-                parsedBlobVector.lengthMode(),
-                "blobVector " + parsedBlobVector.name() + " in message " + parsedMessageType.name(),
-                sourcePath,
-                diagnostics,
-                previousPrimitiveFieldNames,
-                true,
-                false);
-        if (lengthMode == null) {
-          continue;
-        }
-        resolvedMembers.add(
-            new ResolvedBlobVector(
-                parsedBlobVector.name(), parsedBlobVector.comment(), lengthMode));
+    MessageResolutionState messageState = new MessageResolutionState();
+    List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
+    for (ParsedMessageMember member : parsedMessageType.members()) {
+      ResolvedMessageMember resolvedMember =
+          resolveMessageMember(parsedMessageType, member, messageState, context);
+      if (resolvedMember != null) {
+        resolvedMembers.add(resolvedMember);
       }
-
-      resolvedMessageTypes.add(
-          new ResolvedMessageType(
-              parsedMessageType.name(),
-              parsedMessageType.comment(),
-              effectiveNamespace,
-              resolvedMembers));
     }
 
+    return new ResolvedMessageType(
+        parsedMessageType.name(), parsedMessageType.comment(), effectiveNamespace, resolvedMembers);
+  }
+
+  /**
+   * Resolves one message member object by its parsed member subtype.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param member parsed member definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveMessageMember(
+      ParsedMessageType parsedMessageType,
+      ParsedMessageMember member,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    if (member instanceof ParsedField parsedField) {
+      return resolveFieldMember(parsedMessageType, parsedField, messageState, context);
+    }
+    if (member instanceof ParsedBitField parsedBitField) {
+      return resolveBitFieldMember(parsedMessageType, parsedBitField, messageState, context);
+    }
+    if (member instanceof ParsedFloat parsedFloat) {
+      return resolveFloatMember(parsedMessageType, parsedFloat, messageState, context);
+    }
+    if (member instanceof ParsedScaledInt parsedScaledInt) {
+      return resolveScaledIntMember(parsedMessageType, parsedScaledInt, messageState, context);
+    }
+    if (member instanceof ParsedArray parsedArray) {
+      return resolveArrayMember(parsedMessageType, parsedArray, messageState, context);
+    }
+    if (member instanceof ParsedVector parsedVector) {
+      return resolveVectorMember(parsedMessageType, parsedVector, messageState, context);
+    }
+    if (member instanceof ParsedBlobArray parsedBlobArray) {
+      return resolveBlobArrayMember(parsedMessageType, parsedBlobArray, messageState, context);
+    }
+    return resolveBlobVectorMember(
+        parsedMessageType, (ParsedBlobVector) member, messageState, context);
+  }
+
+  /**
+   * Resolves one parsed scalar field member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedField parsed field definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved field member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveFieldMember(
+      ParsedMessageType parsedMessageType,
+      ParsedField parsedField,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedField.name(),
+        "SEMANTIC_INVALID_FIELD_NAME",
+        "Field name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    if (!messageState.namedMembers.add(parsedField.name())) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_DUPLICATE_FIELD_NAME",
+              "Duplicate member name in message "
+                  + parsedMessageType.name()
+                  + ": "
+                  + parsedField.name(),
+              context.sourcePath));
+    }
+
+    ResolvedTypeRef typeRef =
+        resolveTypeRef(parsedField.typeName(), parsedMessageType.name(), context);
+    if (typeRef == null) {
+      return null;
+    }
+    if (typeRef instanceof PrimitiveTypeRef) {
+      messageState.previousPrimitiveFieldNames.add(parsedField.name());
+    }
+
+    return new ResolvedField(
+        parsedField.name(),
+        typeRef,
+        parsedField.length(),
+        parsedField.endian(),
+        parsedField.fixed(),
+        parsedField.comment());
+  }
+
+  /**
+   * Resolves one parsed bitfield message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedBitField parsed bitfield definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved bitfield member
+   */
+  private static ResolvedMessageMember resolveBitFieldMember(
+      ParsedMessageType parsedMessageType,
+      ParsedBitField parsedBitField,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedBitField.name(), messageState.namedMembers, context);
+    return resolveBitField(parsedBitField, context.sourcePath, context.diagnostics);
+  }
+
+  /**
+   * Resolves one parsed float message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedFloat parsed float definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved float member
+   */
+  private static ResolvedMessageMember resolveFloatMember(
+      ParsedMessageType parsedMessageType,
+      ParsedFloat parsedFloat,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedFloat.name(),
+        "SEMANTIC_INVALID_FLOAT_NAME",
+        "Float name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedFloat.name(), messageState.namedMembers, context);
+    validateFloatScaleRules(parsedFloat, context.sourcePath, context.diagnostics);
+
+    return new ResolvedFloat(
+        parsedFloat.name(),
+        parsedFloat.size(),
+        parsedFloat.encoding(),
+        parsedFloat.scale(),
+        parsedFloat.endian(),
+        parsedFloat.comment());
+  }
+
+  /**
+   * Resolves one parsed scaled-int message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedScaledInt parsed scaled-int definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved scaled-int member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveScaledIntMember(
+      ParsedMessageType parsedMessageType,
+      ParsedScaledInt parsedScaledInt,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedScaledInt.name(),
+        "SEMANTIC_INVALID_SCALED_INT_NAME",
+        "ScaledInt name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedScaledInt.name(), messageState.namedMembers, context);
+
+    PrimitiveType baseType = PrimitiveType.fromSchemaName(parsedScaledInt.baseTypeName());
+    if (baseType == null) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_SCALED_INT_BASE_TYPE",
+              "Invalid scaledInt baseType in message "
+                  + parsedMessageType.name()
+                  + ": "
+                  + parsedScaledInt.baseTypeName(),
+              context.sourcePath));
+      return null;
+    }
+
+    return new ResolvedScaledInt(
+        parsedScaledInt.name(),
+        baseType,
+        parsedScaledInt.scale(),
+        parsedScaledInt.endian(),
+        parsedScaledInt.comment());
+  }
+
+  /**
+   * Resolves one parsed array message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedArray parsed array definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved array member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveArrayMember(
+      ParsedMessageType parsedMessageType,
+      ParsedArray parsedArray,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedArray.name(),
+        "SEMANTIC_INVALID_ARRAY_NAME",
+        "Array name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedArray.name(), messageState.namedMembers, context);
+
+    ResolvedTypeRef elementTypeRef =
+        resolveTypeRef(
+            parsedArray.elementTypeName(),
+            "array " + parsedArray.name() + " in message " + parsedMessageType.name(),
+            context);
+    if (elementTypeRef == null) {
+      return null;
+    }
+
+    return new ResolvedArray(
+        parsedArray.name(),
+        elementTypeRef,
+        parsedArray.length(),
+        parsedArray.endian(),
+        parsedArray.comment());
+  }
+
+  /**
+   * Resolves one parsed vector message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedVector parsed vector definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved vector member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveVectorMember(
+      ParsedMessageType parsedMessageType,
+      ParsedVector parsedVector,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedVector.name(),
+        "SEMANTIC_INVALID_VECTOR_NAME",
+        "Vector name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedVector.name(), messageState.namedMembers, context);
+
+    ResolvedTypeRef elementTypeRef =
+        resolveTypeRef(
+            parsedVector.elementTypeName(),
+            "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
+            context);
+    ResolvedLengthMode lengthMode =
+        resolveLengthMode(
+            parsedVector.lengthMode(),
+            "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
+            context.sourcePath,
+            context.diagnostics,
+            messageState.previousPrimitiveFieldNames,
+            true,
+            true);
+    if (elementTypeRef == null || lengthMode == null) {
+      return null;
+    }
+
+    return new ResolvedVector(
+        parsedVector.name(),
+        elementTypeRef,
+        parsedVector.endian(),
+        parsedVector.comment(),
+        lengthMode);
+  }
+
+  /**
+   * Resolves one parsed blob-array message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedBlobArray parsed blob-array definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved blob-array member
+   */
+  private static ResolvedMessageMember resolveBlobArrayMember(
+      ParsedMessageType parsedMessageType,
+      ParsedBlobArray parsedBlobArray,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedBlobArray.name(),
+        "SEMANTIC_INVALID_BLOB_ARRAY_NAME",
+        "blobArray name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedBlobArray.name(), messageState.namedMembers, context);
+
+    return new ResolvedBlobArray(
+        parsedBlobArray.name(), parsedBlobArray.length(), parsedBlobArray.comment());
+  }
+
+  /**
+   * Resolves one parsed blob-vector message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedBlobVector parsed blob-vector definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved blob-vector member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveBlobVectorMember(
+      ParsedMessageType parsedMessageType,
+      ParsedBlobVector parsedBlobVector,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedBlobVector.name(),
+        "SEMANTIC_INVALID_BLOB_VECTOR_NAME",
+        "blobVector name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedBlobVector.name(), messageState.namedMembers, context);
+
+    ResolvedLengthMode lengthMode =
+        resolveLengthMode(
+            parsedBlobVector.lengthMode(),
+            "blobVector " + parsedBlobVector.name() + " in message " + parsedMessageType.name(),
+            context.sourcePath,
+            context.diagnostics,
+            messageState.previousPrimitiveFieldNames,
+            true,
+            false);
+    if (lengthMode == null) {
+      return null;
+    }
+
+    return new ResolvedBlobVector(parsedBlobVector.name(), parsedBlobVector.comment(), lengthMode);
+  }
+
+  /**
+   * Adds a duplicate-member diagnostic when a message member name is repeated.
+   *
+   * @param messageTypeName parent message name
+   * @param memberName member name being registered
+   * @param knownMemberNames previously seen names in this message
+   * @param context shared semantic-resolution state
+   */
+  private static void registerDuplicateMemberName(
+      String messageTypeName,
+      String memberName,
+      Set<String> knownMemberNames,
+      ResolutionContext context) {
+    if (!knownMemberNames.add(memberName)) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_DUPLICATE_MEMBER_NAME",
+              "Duplicate member name in message " + messageTypeName + ": " + memberName,
+              context.sourcePath));
+    }
+  }
+
+  /**
+   * Throws a semantic-validation exception when any error diagnostics were collected.
+   *
+   * @param diagnostics semantic diagnostics list
+   * @throws BmsException if one or more error diagnostics are present
+   */
+  private static void throwIfDiagnosticsContainErrors(List<Diagnostic> diagnostics)
+      throws BmsException {
     if (Diagnostics.hasErrors(diagnostics)) {
       throw new BmsException("Semantic validation failed.", diagnostics);
     }
-
-    return new ResolvedSchema(
-        parsedSchema.namespace(),
-        resolvedMessageTypes,
-        resolvedReusableBitFields,
-        resolvedReusableFloats,
-        resolvedReusableScaledInts,
-        resolvedReusableArrays,
-        resolvedReusableVectors,
-        resolvedReusableBlobArrays,
-        resolvedReusableBlobVectors);
   }
 
   /**
@@ -736,60 +983,42 @@ public final class SemanticResolver {
    *
    * @param typeName type name from XML
    * @param ownerContext owning context used in diagnostics
-   * @param messageTypeByName lookup of parsed message types
-   * @param reusableFloatByName lookup of reusable float definitions
-   * @param reusableScaledIntByName lookup of reusable scaled-int definitions
-   * @param reusableArrayByName lookup of reusable array definitions
-   * @param reusableVectorByName lookup of reusable vector definitions
-   * @param reusableBlobArrayByName lookup of reusable blob-array definitions
-   * @param reusableBlobVectorByName lookup of reusable blob-vector definitions
-   * @param sourcePath source path used in diagnostics
-   * @param diagnostics list that receives semantic errors
+   * @param context shared semantic-resolution state
    * @return resolved type reference, or {@code null} when unresolved
    */
   private static ResolvedTypeRef resolveTypeRef(
-      String typeName,
-      String ownerContext,
-      Map<String, ParsedMessageType> messageTypeByName,
-      Map<String, ParsedFloat> reusableFloatByName,
-      Map<String, ParsedScaledInt> reusableScaledIntByName,
-      Map<String, ParsedArray> reusableArrayByName,
-      Map<String, ParsedVector> reusableVectorByName,
-      Map<String, ParsedBlobArray> reusableBlobArrayByName,
-      Map<String, ParsedBlobVector> reusableBlobVectorByName,
-      String sourcePath,
-      List<Diagnostic> diagnostics) {
+      String typeName, String ownerContext, ResolutionContext context) {
     PrimitiveType primitiveType = PrimitiveType.fromSchemaName(typeName);
     if (primitiveType != null) {
       return new PrimitiveTypeRef(primitiveType);
     }
-    if (messageTypeByName.containsKey(typeName)) {
+    if (context.messageTypeByName.containsKey(typeName)) {
       return new MessageTypeRef(typeName);
     }
-    if (reusableFloatByName.containsKey(typeName)) {
+    if (context.reusableFloatByName.containsKey(typeName)) {
       return new FloatTypeRef(typeName);
     }
-    if (reusableScaledIntByName.containsKey(typeName)) {
+    if (context.reusableScaledIntByName.containsKey(typeName)) {
       return new ScaledIntTypeRef(typeName);
     }
-    if (reusableArrayByName.containsKey(typeName)) {
+    if (context.reusableArrayByName.containsKey(typeName)) {
       return new ArrayTypeRef(typeName);
     }
-    if (reusableVectorByName.containsKey(typeName)) {
+    if (context.reusableVectorByName.containsKey(typeName)) {
       return new VectorTypeRef(typeName);
     }
-    if (reusableBlobArrayByName.containsKey(typeName)) {
+    if (context.reusableBlobArrayByName.containsKey(typeName)) {
       return new BlobArrayTypeRef(typeName);
     }
-    if (reusableBlobVectorByName.containsKey(typeName)) {
+    if (context.reusableBlobVectorByName.containsKey(typeName)) {
       return new BlobVectorTypeRef(typeName);
     }
 
-    diagnostics.add(
+    context.diagnostics.add(
         error(
             "SEMANTIC_UNKNOWN_TYPE",
             "Unknown type in " + ownerContext + ": " + typeName,
-            sourcePath));
+            context.sourcePath));
     return null;
   }
 
@@ -811,8 +1040,37 @@ public final class SemanticResolver {
         diagnostics);
 
     int bitWidth = parsedBitField.size().bitWidth();
-
     Set<String> usedNames = new HashSet<>();
+    List<ResolvedBitFlag> resolvedFlags =
+        resolveBitFlags(parsedBitField, bitWidth, usedNames, sourcePath, diagnostics);
+    List<ResolvedBitSegment> resolvedSegments =
+        resolveBitSegments(parsedBitField, bitWidth, usedNames, sourcePath, diagnostics);
+
+    return new ResolvedBitField(
+        parsedBitField.name(),
+        parsedBitField.size(),
+        parsedBitField.endian(),
+        parsedBitField.comment(),
+        resolvedFlags,
+        resolvedSegments);
+  }
+
+  /**
+   * Resolves all parsed flags within a bitfield.
+   *
+   * @param parsedBitField parsed parent bitfield definition
+   * @param bitWidth total number of bits in the parent bitfield
+   * @param usedNames names already seen in this bitfield
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   * @return resolved flag definitions
+   */
+  private static List<ResolvedBitFlag> resolveBitFlags(
+      ParsedBitField parsedBitField,
+      int bitWidth,
+      Set<String> usedNames,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
     Set<String> flagNames = new HashSet<>();
     Set<Integer> flagPositions = new HashSet<>();
     List<ResolvedBitFlag> resolvedFlags = new ArrayList<>();
@@ -832,42 +1090,36 @@ public final class SemanticResolver {
                 "Duplicate flag name: " + parsedFlag.name(),
                 sourcePath));
       }
-      if (!usedNames.add(parsedFlag.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_BIT_MEMBER_NAME",
-                "Duplicate bitField member name in "
-                    + parsedBitField.name()
-                    + ": "
-                    + parsedFlag.name(),
-                sourcePath));
-      }
-      if (parsedFlag.position() >= bitWidth) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_INVALID_BIT_POSITION",
-                "Flag position "
-                    + parsedFlag.position()
-                    + " is outside bitField size "
-                    + parsedBitField.size().xmlValue()
-                    + " for bitField "
-                    + parsedBitField.name(),
-                sourcePath));
-      }
-      if (!flagPositions.add(parsedFlag.position())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_FLAG_POSITION",
-                "Duplicate flag position: " + parsedFlag.position(),
-                sourcePath));
-      }
+      registerDuplicateBitMemberName(
+          parsedBitField.name(), parsedFlag.name(), usedNames, sourcePath, diagnostics);
+      validateFlagPosition(
+          parsedBitField, bitWidth, parsedFlag, flagPositions, sourcePath, diagnostics);
 
       resolvedFlags.add(
           new ResolvedBitFlag(parsedFlag.name(), parsedFlag.position(), parsedFlag.comment()));
     }
+    return resolvedFlags;
+  }
 
+  /**
+   * Resolves all parsed segments within a bitfield.
+   *
+   * @param parsedBitField parsed parent bitfield definition
+   * @param bitWidth total number of bits in the parent bitfield
+   * @param usedNames names already seen in this bitfield
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   * @return resolved segment definitions
+   */
+  private static List<ResolvedBitSegment> resolveBitSegments(
+      ParsedBitField parsedBitField,
+      int bitWidth,
+      Set<String> usedNames,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
     Set<String> segmentNames = new HashSet<>();
     List<ResolvedBitSegment> resolvedSegments = new ArrayList<>();
+
     for (ParsedBitSegment parsedSegment : parsedBitField.segments()) {
       validateIdentifier(
           parsedSegment.name(),
@@ -883,78 +1135,9 @@ public final class SemanticResolver {
                 "Duplicate segment name: " + parsedSegment.name(),
                 sourcePath));
       }
-      if (!usedNames.add(parsedSegment.name())) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_DUPLICATE_BIT_MEMBER_NAME",
-                "Duplicate bitField member name in "
-                    + parsedBitField.name()
-                    + ": "
-                    + parsedSegment.name(),
-                sourcePath));
-      }
-
-      if (parsedSegment.fromBit() > parsedSegment.toBit()) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_INVALID_SEGMENT_RANGE",
-                "Segment range must satisfy from <= to for segment " + parsedSegment.name(),
-                sourcePath));
-      }
-      if (parsedSegment.fromBit() >= bitWidth || parsedSegment.toBit() >= bitWidth) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_INVALID_SEGMENT_RANGE",
-                "Segment "
-                    + parsedSegment.name()
-                    + " is outside bitField size "
-                    + parsedBitField.size().xmlValue(),
-                sourcePath));
-      }
-
-      int segmentBitCount = parsedSegment.toBit() - parsedSegment.fromBit() + 1;
-      BigInteger maxAllowedValue =
-          BigInteger.ONE.shiftLeft(Math.max(segmentBitCount, 0)).subtract(BigInteger.ONE);
-
-      Set<String> variantNames = new HashSet<>();
-      List<ResolvedBitVariant> resolvedVariants = new ArrayList<>();
-      for (ParsedBitVariant parsedVariant : parsedSegment.variants()) {
-        validateIdentifier(
-            parsedVariant.name(),
-            "SEMANTIC_INVALID_VARIANT_NAME",
-            "Variant name must be a valid identifier: ",
-            sourcePath,
-            diagnostics);
-
-        if (!variantNames.add(parsedVariant.name())) {
-          diagnostics.add(
-              error(
-                  "SEMANTIC_DUPLICATE_VARIANT_NAME",
-                  "Duplicate variant name in segment "
-                      + parsedSegment.name()
-                      + ": "
-                      + parsedVariant.name(),
-                  sourcePath));
-        }
-
-        if (parsedVariant.value().compareTo(maxAllowedValue) > 0) {
-          diagnostics.add(
-              error(
-                  "SEMANTIC_INVALID_VARIANT_VALUE",
-                  "Variant value "
-                      + parsedVariant.value()
-                      + " is too large for segment "
-                      + parsedSegment.name()
-                      + " ("
-                      + segmentBitCount
-                      + " bits).",
-                  sourcePath));
-        }
-
-        resolvedVariants.add(
-            new ResolvedBitVariant(
-                parsedVariant.name(), parsedVariant.value(), parsedVariant.comment()));
-      }
+      registerDuplicateBitMemberName(
+          parsedBitField.name(), parsedSegment.name(), usedNames, sourcePath, diagnostics);
+      validateSegmentRange(parsedBitField, bitWidth, parsedSegment, sourcePath, diagnostics);
 
       resolvedSegments.add(
           new ResolvedBitSegment(
@@ -962,16 +1145,222 @@ public final class SemanticResolver {
               parsedSegment.fromBit(),
               parsedSegment.toBit(),
               parsedSegment.comment(),
-              resolvedVariants));
+              resolveBitVariants(parsedSegment, sourcePath, diagnostics)));
     }
+    return resolvedSegments;
+  }
 
-    return new ResolvedBitField(
-        parsedBitField.name(),
-        parsedBitField.size(),
-        parsedBitField.endian(),
-        parsedBitField.comment(),
-        resolvedFlags,
-        resolvedSegments);
+  /**
+   * Resolves parsed segment variants and enforces name/value constraints.
+   *
+   * @param parsedSegment parsed parent segment definition
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   * @return resolved variant definitions
+   */
+  private static List<ResolvedBitVariant> resolveBitVariants(
+      ParsedBitSegment parsedSegment, String sourcePath, List<Diagnostic> diagnostics) {
+    int segmentBitCount = parsedSegment.toBit() - parsedSegment.fromBit() + 1;
+    BigInteger maxAllowedValue =
+        BigInteger.ONE.shiftLeft(Math.max(segmentBitCount, 0)).subtract(BigInteger.ONE);
+
+    Set<String> variantNames = new HashSet<>();
+    List<ResolvedBitVariant> resolvedVariants = new ArrayList<>();
+    for (ParsedBitVariant parsedVariant : parsedSegment.variants()) {
+      validateIdentifier(
+          parsedVariant.name(),
+          "SEMANTIC_INVALID_VARIANT_NAME",
+          "Variant name must be a valid identifier: ",
+          sourcePath,
+          diagnostics);
+      if (!variantNames.add(parsedVariant.name())) {
+        diagnostics.add(
+            error(
+                "SEMANTIC_DUPLICATE_VARIANT_NAME",
+                "Duplicate variant name in segment "
+                    + parsedSegment.name()
+                    + ": "
+                    + parsedVariant.name(),
+                sourcePath));
+      }
+      if (parsedVariant.value().compareTo(maxAllowedValue) > 0) {
+        diagnostics.add(
+            error(
+                "SEMANTIC_INVALID_VARIANT_VALUE",
+                "Variant value "
+                    + parsedVariant.value()
+                    + " is too large for segment "
+                    + parsedSegment.name()
+                    + " ("
+                    + segmentBitCount
+                    + " bits).",
+                sourcePath));
+      }
+
+      resolvedVariants.add(
+          new ResolvedBitVariant(
+              parsedVariant.name(), parsedVariant.value(), parsedVariant.comment()));
+    }
+    return resolvedVariants;
+  }
+
+  /**
+   * Adds a duplicate-member diagnostic when a bitfield member name is repeated.
+   *
+   * @param bitFieldName parent bitfield name
+   * @param memberName member name being registered
+   * @param usedNames names already seen in this bitfield
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
+  private static void registerDuplicateBitMemberName(
+      String bitFieldName,
+      String memberName,
+      Set<String> usedNames,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
+    if (!usedNames.add(memberName)) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_DUPLICATE_BIT_MEMBER_NAME",
+              "Duplicate bitField member name in " + bitFieldName + ": " + memberName,
+              sourcePath));
+    }
+  }
+
+  /**
+   * Validates one flag position against the parent bitfield width and used positions.
+   *
+   * @param parsedBitField parsed parent bitfield definition
+   * @param bitWidth total number of bits in the parent bitfield
+   * @param parsedFlag parsed flag definition
+   * @param knownPositions previously seen bit positions
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
+  private static void validateFlagPosition(
+      ParsedBitField parsedBitField,
+      int bitWidth,
+      ParsedBitFlag parsedFlag,
+      Set<Integer> knownPositions,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
+    if (parsedFlag.position() >= bitWidth) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_BIT_POSITION",
+              "Flag position "
+                  + parsedFlag.position()
+                  + " is outside bitField size "
+                  + parsedBitField.size().xmlValue()
+                  + " for bitField "
+                  + parsedBitField.name(),
+              sourcePath));
+    }
+    if (!knownPositions.add(parsedFlag.position())) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_DUPLICATE_FLAG_POSITION",
+              "Duplicate flag position: " + parsedFlag.position(),
+              sourcePath));
+    }
+  }
+
+  /**
+   * Validates one segment range against ordering and parent bitfield width rules.
+   *
+   * @param parsedBitField parsed parent bitfield definition
+   * @param bitWidth total number of bits in the parent bitfield
+   * @param parsedSegment parsed segment definition
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics list that receives semantic errors
+   */
+  private static void validateSegmentRange(
+      ParsedBitField parsedBitField,
+      int bitWidth,
+      ParsedBitSegment parsedSegment,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
+    if (parsedSegment.fromBit() > parsedSegment.toBit()) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_SEGMENT_RANGE",
+              "Segment range must satisfy from <= to for segment " + parsedSegment.name(),
+              sourcePath));
+    }
+    if (parsedSegment.fromBit() >= bitWidth || parsedSegment.toBit() >= bitWidth) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_SEGMENT_RANGE",
+              "Segment "
+                  + parsedSegment.name()
+                  + " is outside bitField size "
+                  + parsedBitField.size().xmlValue(),
+              sourcePath));
+    }
+  }
+
+  /**
+   * Shared context object used while resolving one schema.
+   *
+   * <p>All mutable lookup tables and diagnostics are centralized here so helper methods stay
+   * focused and have short parameter lists.
+   */
+  private static final class ResolutionContext {
+    private final String sourcePath;
+    private final List<Diagnostic> diagnostics;
+    private final Map<String, ParsedMessageType> messageTypeByName;
+    private final Map<String, ParsedFloat> reusableFloatByName;
+    private final Map<String, ParsedScaledInt> reusableScaledIntByName;
+    private final Map<String, ParsedArray> reusableArrayByName;
+    private final Map<String, ParsedVector> reusableVectorByName;
+    private final Map<String, ParsedBlobArray> reusableBlobArrayByName;
+    private final Map<String, ParsedBlobVector> reusableBlobVectorByName;
+    private final Set<String> globalTypeNames;
+
+    /**
+     * Creates a fresh per-schema resolution context.
+     *
+     * @param sourcePath human-readable source path used in diagnostics
+     */
+    private ResolutionContext(String sourcePath) {
+      this.sourcePath = sourcePath;
+      diagnostics = new ArrayList<>();
+      messageTypeByName = new LinkedHashMap<>();
+      reusableFloatByName = new LinkedHashMap<>();
+      reusableScaledIntByName = new LinkedHashMap<>();
+      reusableArrayByName = new LinkedHashMap<>();
+      reusableVectorByName = new LinkedHashMap<>();
+      reusableBlobArrayByName = new LinkedHashMap<>();
+      reusableBlobVectorByName = new LinkedHashMap<>();
+      globalTypeNames = new HashSet<>();
+    }
+  }
+
+  /**
+   * Groups resolved reusable definitions so the main resolver method can return them together.
+   *
+   * @param reusableBitFields resolved schema-level reusable bitfields
+   * @param reusableFloats resolved schema-level reusable floats
+   * @param reusableScaledInts resolved schema-level reusable scaled-ints
+   * @param reusableArrays resolved schema-level reusable arrays
+   * @param reusableVectors resolved schema-level reusable vectors
+   * @param reusableBlobArrays resolved schema-level reusable blob arrays
+   * @param reusableBlobVectors resolved schema-level reusable blob vectors
+   */
+  private record ReusableResolution(
+      List<ResolvedBitField> reusableBitFields,
+      List<ResolvedFloat> reusableFloats,
+      List<ResolvedScaledInt> reusableScaledInts,
+      List<ResolvedArray> reusableArrays,
+      List<ResolvedVector> reusableVectors,
+      List<ResolvedBlobArray> reusableBlobArrays,
+      List<ResolvedBlobVector> reusableBlobVectors) {}
+
+  /** Per-message state used while resolving message members in declaration order. */
+  private static final class MessageResolutionState {
+    private final Set<String> namedMembers = new HashSet<>();
+    private final Set<String> previousPrimitiveFieldNames = new HashSet<>();
   }
 
   /**

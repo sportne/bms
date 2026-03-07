@@ -4,6 +4,39 @@
     "https://checkstyle.org/dtds/configuration_1_3.dtd">
 <module name="Checker">
   <module name="TreeWalker">
+    <!-- WARNING: Nudge at 150 lines -->
+    <module name="MethodLength">
+      <property name="max" value="150"/>
+      <property name="severity" value="warning"/>
+    </module>
+
+    <!-- ERROR: Fail build at 300 lines -->
+    <module name="MethodLength">
+      <property name="max" value="300"/>
+      <property name="severity" value="error"/>
+    </module>
+
+    <!-- Same for Complexity: Warn at 15, Fail at 30 -->
+    <module name="CyclomaticComplexity">
+      <property name="max" value="15"/>
+      <property name="severity" value="warning"/>
+    </module>
+    <module name="CyclomaticComplexity">
+      <property name="max" value="30"/>
+      <property name="severity" value="error"/>
+    </module>
+
+    <!-- Nudge 3: Max 3 levels of nested 'if' statements -->
+    <module name="NestedIfDepth">
+      <property name="max" value="2"/>
+      <property name="severity" value="warning"/>
+    </module>
+    <module name="NestedIfDepth">
+      <property name="max" value="5"/>
+      <property name="severity" value="error"/>
+    </module>
+
+    <!-- Enforcement: Mandatory Javadocs for all visibility levels -->
     <module name="MissingJavadocMethod">
       <property name="scope" value="private"/>
       <property name="tokens" value="METHOD_DEF,CTOR_DEF,COMPACT_CTOR_DEF"/>
@@ -11,6 +44,8 @@
           name="allowedAnnotations"
           value="Override,Test,ParameterizedTest,BeforeEach,AfterEach,BeforeAll,AfterAll"/>
     </module>
+
+    <!-- Validation: Javadoc content rules -->
     <module name="JavadocMethod">
       <property name="accessModifiers" value="public,protected,package,private"/>
       <property name="tokens" value="METHOD_DEF,CTOR_DEF,COMPACT_CTOR_DEF"/>
