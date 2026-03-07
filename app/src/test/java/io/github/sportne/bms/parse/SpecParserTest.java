@@ -9,12 +9,17 @@ import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBlobArray;
 import io.github.sportne.bms.model.parsed.ParsedBlobVector;
+import io.github.sportne.bms.model.parsed.ParsedChecksum;
 import io.github.sportne.bms.model.parsed.ParsedCountFieldLength;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedIfBlock;
+import io.github.sportne.bms.model.parsed.ParsedMessageType;
+import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorMatch;
+import io.github.sportne.bms.model.parsed.ParsedVarString;
 import io.github.sportne.bms.model.parsed.ParsedVector;
 import io.github.sportne.bms.testutil.TestSupport;
 import io.github.sportne.bms.util.BmsException;
@@ -60,7 +65,7 @@ class SpecParserTest {
   @Test
   void parserFailsFastForUnsupportedElement() {
     SpecParser parser = new SpecParser();
-    Path specPath = TestSupport.resourcePath("specs/unsupported-root-pad.xml");
+    Path specPath = TestSupport.resourcePath("specs/unsupported-root-unknown.xml");
 
     BmsException exception = assertThrows(BmsException.class, () -> parser.parse(specPath));
 
@@ -73,7 +78,7 @@ class SpecParserTest {
   @Test
   void parserFailsFastForUnsupportedMessageTypeElement() {
     SpecParser parser = new SpecParser();
-    Path specPath = TestSupport.resourcePath("specs/unsupported-message-if.xml");
+    Path specPath = TestSupport.resourcePath("specs/unsupported-message-unknown.xml");
 
     BmsException exception = assertThrows(BmsException.class, () -> parser.parse(specPath));
 
@@ -168,6 +173,35 @@ class SpecParserTest {
     assertEquals("inner", secondNode.name());
     assertTrue(secondNode.next() instanceof ParsedTerminatorMatch);
     assertEquals("0x00", ((ParsedTerminatorMatch) secondNode.next()).value());
+  }
+
+  /** Contract: milestone-03 members parse correctly in both root and message scopes. */
+  @Test
+  void parserReadsMilestoneThreeSlice() throws Exception {
+    SpecParser parser = new SpecParser();
+    Path specPath = TestSupport.resourcePath("specs/milestone-03-valid.xml");
+
+    ParsedSchema parsedSchema = parser.parse(specPath);
+
+    assertEquals(1, parsedSchema.reusableVarStrings().size());
+    assertEquals(1, parsedSchema.reusableChecksums().size());
+    assertEquals(1, parsedSchema.reusablePads().size());
+    assertEquals("LabelText", parsedSchema.reusableVarStrings().get(0).name());
+    assertEquals("crc32", parsedSchema.reusableChecksums().get(0).algorithm());
+    assertEquals(2, parsedSchema.reusablePads().get(0).bytes());
+
+    var message = parsedSchema.messageTypes().get(0);
+    assertEquals(7, message.members().size());
+    assertTrue(message.members().get(1) instanceof ParsedVarString);
+    assertTrue(message.members().get(3) instanceof ParsedPad);
+    assertTrue(message.members().get(4) instanceof ParsedChecksum);
+    assertTrue(message.members().get(5) instanceof ParsedIfBlock);
+    assertTrue(message.members().get(6) instanceof ParsedMessageType);
+
+    ParsedIfBlock ifBlock = (ParsedIfBlock) message.members().get(5);
+    assertEquals("version == 1", ifBlock.test());
+    assertEquals(3, ifBlock.members().size());
+    assertTrue(ifBlock.members().get(1) instanceof ParsedVarString);
   }
 
   /** Contract: non-numeric integer attributes must produce invalid-attribute diagnostics. */

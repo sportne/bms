@@ -13,4 +13,5 @@ public sealed interface ResolvedTypeRef
         ArrayTypeRef,
         VectorTypeRef,
         BlobArrayTypeRef,
-        BlobVectorTypeRef {}
+        BlobVectorTypeRef,
+        VarStringTypeRef {}

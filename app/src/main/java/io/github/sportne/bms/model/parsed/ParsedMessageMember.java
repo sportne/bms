@@ -13,4 +13,9 @@ public sealed interface ParsedMessageMember
         ParsedArray,
         ParsedVector,
         ParsedBlobArray,
-        ParsedBlobVector {}
+        ParsedBlobVector,
+        ParsedVarString,
+        ParsedPad,
+        ParsedChecksum,
+        ParsedIfBlock,
+        ParsedMessageType {}

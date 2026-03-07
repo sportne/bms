@@ -14,7 +14,8 @@ import java.util.Objects;
  * @param members members in exact XML declaration order
  */
 public record ParsedMessageType(
-    String name, String comment, String namespaceOverride, List<ParsedMessageMember> members) {
+    String name, String comment, String namespaceOverride, List<ParsedMessageMember> members)
+    implements ParsedMessageMember {
   /**
    * Creates a parsed message-type object.
    *

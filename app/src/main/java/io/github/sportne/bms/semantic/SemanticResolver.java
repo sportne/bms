@@ -7,18 +7,22 @@ import io.github.sportne.bms.model.parsed.ParsedBitSegment;
 import io.github.sportne.bms.model.parsed.ParsedBitVariant;
 import io.github.sportne.bms.model.parsed.ParsedBlobArray;
 import io.github.sportne.bms.model.parsed.ParsedBlobVector;
+import io.github.sportne.bms.model.parsed.ParsedChecksum;
 import io.github.sportne.bms.model.parsed.ParsedCountFieldLength;
 import io.github.sportne.bms.model.parsed.ParsedField;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedIfBlock;
 import io.github.sportne.bms.model.parsed.ParsedLengthMode;
 import io.github.sportne.bms.model.parsed.ParsedMessageMember;
 import io.github.sportne.bms.model.parsed.ParsedMessageType;
+import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorMatch;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorNode;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorValueLength;
+import io.github.sportne.bms.model.parsed.ParsedVarString;
 import io.github.sportne.bms.model.parsed.ParsedVector;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
@@ -34,12 +38,15 @@ import io.github.sportne.bms.model.resolved.ResolvedBitSegment;
 import io.github.sportne.bms.model.resolved.ResolvedBitVariant;
 import io.github.sportne.bms.model.resolved.ResolvedBlobArray;
 import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
+import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
+import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
@@ -47,8 +54,10 @@ import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedVarString;
 import io.github.sportne.bms.model.resolved.ResolvedVector;
 import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
+import io.github.sportne.bms.model.resolved.VarStringTypeRef;
 import io.github.sportne.bms.model.resolved.VectorTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
@@ -105,7 +114,10 @@ public final class SemanticResolver {
         reusableResolution.reusableArrays(),
         reusableResolution.reusableVectors(),
         reusableResolution.reusableBlobArrays(),
-        reusableResolution.reusableBlobVectors());
+        reusableResolution.reusableBlobVectors(),
+        reusableResolution.reusableVarStrings(),
+        reusableResolution.reusableChecksums(),
+        reusableResolution.reusablePads());
   }
 
   /**
@@ -123,6 +135,7 @@ public final class SemanticResolver {
     registerReusableVectors(parsedSchema.reusableVectors(), context);
     registerReusableBlobArrays(parsedSchema.reusableBlobArrays(), context);
     registerReusableBlobVectors(parsedSchema.reusableBlobVectors(), context);
+    registerReusableVarStrings(parsedSchema.reusableVarStrings(), context);
   }
 
   /**
@@ -318,6 +331,33 @@ public final class SemanticResolver {
   }
 
   /**
+   * Registers reusable varString definitions and validates their type names.
+   *
+   * @param reusableVarStrings parsed reusable varString definitions
+   * @param context shared semantic-resolution state
+   */
+  private static void registerReusableVarStrings(
+      List<ParsedVarString> reusableVarStrings, ResolutionContext context) {
+    for (ParsedVarString parsedVarString : reusableVarStrings) {
+      validateIdentifier(
+          parsedVarString.name(),
+          "SEMANTIC_INVALID_VAR_STRING_NAME",
+          "varString type name must be a valid identifier: ",
+          context.sourcePath,
+          context.diagnostics);
+      registerGlobalTypeName(parsedVarString.name(), context);
+      if (context.reusableVarStringByName.putIfAbsent(parsedVarString.name(), parsedVarString)
+          != null) {
+        context.diagnostics.add(
+            error(
+                "SEMANTIC_DUPLICATE_VAR_STRING_TYPE",
+                "Duplicate reusable varString name: " + parsedVarString.name(),
+                context.sourcePath));
+      }
+    }
+  }
+
+  /**
    * Registers one type name in the schema-level global type set.
    *
    * @param typeName type name being registered
@@ -354,6 +394,11 @@ public final class SemanticResolver {
         resolveReusableBlobArrays(parsedSchema.reusableBlobArrays());
     List<ResolvedBlobVector> resolvedReusableBlobVectors =
         resolveReusableBlobVectors(parsedSchema.reusableBlobVectors(), context);
+    List<ResolvedVarString> resolvedReusableVarStrings =
+        resolveReusableVarStrings(parsedSchema.reusableVarStrings(), context);
+    List<ResolvedChecksum> resolvedReusableChecksums =
+        resolveReusableChecksums(parsedSchema.reusableChecksums());
+    List<ResolvedPad> resolvedReusablePads = resolveReusablePads(parsedSchema.reusablePads());
     List<ResolvedBitField> resolvedReusableBitFields =
         resolveReusableBitFields(parsedSchema.reusableBitFields(), context);
 
@@ -364,7 +409,10 @@ public final class SemanticResolver {
         resolvedReusableArrays,
         resolvedReusableVectors,
         resolvedReusableBlobArrays,
-        resolvedReusableBlobVectors);
+        resolvedReusableBlobVectors,
+        resolvedReusableVarStrings,
+        resolvedReusableChecksums,
+        resolvedReusablePads);
   }
 
   /**
@@ -534,6 +582,70 @@ public final class SemanticResolver {
   }
 
   /**
+   * Resolves reusable varString definitions.
+   *
+   * @param reusableVarStrings parsed reusable varString definitions
+   * @param context shared semantic-resolution state
+   * @return resolved reusable varStrings
+   */
+  private static List<ResolvedVarString> resolveReusableVarStrings(
+      List<ParsedVarString> reusableVarStrings, ResolutionContext context) {
+    List<ResolvedVarString> resolvedReusableVarStrings = new ArrayList<>();
+    for (ParsedVarString parsedVarString : reusableVarStrings) {
+      ResolvedLengthMode lengthMode =
+          resolveLengthMode(
+              parsedVarString.lengthMode(),
+              "reusable varString " + parsedVarString.name(),
+              context.sourcePath,
+              context.diagnostics,
+              Collections.emptySet(),
+              false,
+              false);
+      if (lengthMode == null) {
+        continue;
+      }
+      resolvedReusableVarStrings.add(
+          new ResolvedVarString(
+              parsedVarString.name(),
+              parsedVarString.encoding(),
+              parsedVarString.comment(),
+              lengthMode));
+    }
+    return resolvedReusableVarStrings;
+  }
+
+  /**
+   * Resolves reusable checksum definitions.
+   *
+   * @param reusableChecksums parsed reusable checksum definitions
+   * @return resolved reusable checksums
+   */
+  private static List<ResolvedChecksum> resolveReusableChecksums(
+      List<ParsedChecksum> reusableChecksums) {
+    List<ResolvedChecksum> resolvedReusableChecksums = new ArrayList<>();
+    for (ParsedChecksum parsedChecksum : reusableChecksums) {
+      resolvedReusableChecksums.add(
+          new ResolvedChecksum(
+              parsedChecksum.algorithm(), parsedChecksum.range(), parsedChecksum.comment()));
+    }
+    return resolvedReusableChecksums;
+  }
+
+  /**
+   * Resolves reusable pad definitions.
+   *
+   * @param reusablePads parsed reusable pad definitions
+   * @return resolved reusable pads
+   */
+  private static List<ResolvedPad> resolveReusablePads(List<ParsedPad> reusablePads) {
+    List<ResolvedPad> resolvedReusablePads = new ArrayList<>();
+    for (ParsedPad parsedPad : reusablePads) {
+      resolvedReusablePads.add(new ResolvedPad(parsedPad.bytes(), parsedPad.comment()));
+    }
+    return resolvedReusablePads;
+  }
+
+  /**
    * Resolves reusable bitfield definitions and enforces unique schema-level bitfield names.
    *
    * @param reusableBitFields parsed reusable bitfield definitions
@@ -594,7 +706,8 @@ public final class SemanticResolver {
     List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
     for (ParsedMessageMember member : parsedMessageType.members()) {
       ResolvedMessageMember resolvedMember =
-          resolveMessageMember(parsedMessageType, member, messageState, context);
+          resolveMessageMember(
+              parsedMessageType, effectiveNamespace, member, messageState, context);
       if (resolvedMember != null) {
         resolvedMembers.add(resolvedMember);
       }
@@ -608,6 +721,7 @@ public final class SemanticResolver {
    * Resolves one message member object by its parsed member subtype.
    *
    * @param parsedMessageType parsed parent message definition
+   * @param currentNamespace effective namespace currently active for this message
    * @param member parsed member definition
    * @param messageState per-message resolution state
    * @param context shared semantic-resolution state
@@ -615,6 +729,7 @@ public final class SemanticResolver {
    */
   private static ResolvedMessageMember resolveMessageMember(
       ParsedMessageType parsedMessageType,
+      String currentNamespace,
       ParsedMessageMember member,
       MessageResolutionState messageState,
       ResolutionContext context) {
@@ -639,8 +754,24 @@ public final class SemanticResolver {
     if (member instanceof ParsedBlobArray parsedBlobArray) {
       return resolveBlobArrayMember(parsedMessageType, parsedBlobArray, messageState, context);
     }
-    return resolveBlobVectorMember(
-        parsedMessageType, (ParsedBlobVector) member, messageState, context);
+    if (member instanceof ParsedBlobVector parsedBlobVector) {
+      return resolveBlobVectorMember(parsedMessageType, parsedBlobVector, messageState, context);
+    }
+    if (member instanceof ParsedVarString parsedVarString) {
+      return resolveVarStringMember(parsedMessageType, parsedVarString, messageState, context);
+    }
+    if (member instanceof ParsedChecksum parsedChecksum) {
+      return resolveChecksumMember(parsedChecksum);
+    }
+    if (member instanceof ParsedPad parsedPad) {
+      return resolvePadMember(parsedPad);
+    }
+    if (member instanceof ParsedIfBlock parsedIfBlock) {
+      return resolveIfBlockMember(
+          parsedMessageType, currentNamespace, parsedIfBlock, messageState, context);
+    }
+    return resolveNestedTypeMember(
+        parsedMessageType, currentNamespace, (ParsedMessageType) member, messageState, context);
   }
 
   /**
@@ -944,6 +1075,158 @@ public final class SemanticResolver {
   }
 
   /**
+   * Resolves one parsed varString message member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param parsedVarString parsed varString definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved varString member, or {@code null} when invalid
+   */
+  private static ResolvedMessageMember resolveVarStringMember(
+      ParsedMessageType parsedMessageType,
+      ParsedVarString parsedVarString,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        parsedVarString.name(),
+        "SEMANTIC_INVALID_VAR_STRING_NAME",
+        "varString name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), parsedVarString.name(), messageState.namedMembers, context);
+
+    ResolvedLengthMode lengthMode =
+        resolveLengthMode(
+            parsedVarString.lengthMode(),
+            "varString " + parsedVarString.name() + " in message " + parsedMessageType.name(),
+            context.sourcePath,
+            context.diagnostics,
+            messageState.previousPrimitiveFieldNames,
+            true,
+            false);
+    if (lengthMode == null) {
+      return null;
+    }
+
+    return new ResolvedVarString(
+        parsedVarString.name(), parsedVarString.encoding(), parsedVarString.comment(), lengthMode);
+  }
+
+  /**
+   * Resolves one parsed checksum member.
+   *
+   * @param parsedChecksum parsed checksum definition
+   * @return resolved checksum member
+   */
+  private static ResolvedMessageMember resolveChecksumMember(ParsedChecksum parsedChecksum) {
+    return new ResolvedChecksum(
+        parsedChecksum.algorithm(), parsedChecksum.range(), parsedChecksum.comment());
+  }
+
+  /**
+   * Resolves one parsed pad member.
+   *
+   * @param parsedPad parsed pad definition
+   * @return resolved pad member
+   */
+  private static ResolvedMessageMember resolvePadMember(ParsedPad parsedPad) {
+    return new ResolvedPad(parsedPad.bytes(), parsedPad.comment());
+  }
+
+  /**
+   * Resolves one parsed conditional block.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param currentNamespace effective namespace currently active for this message
+   * @param parsedIfBlock parsed conditional block
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved conditional block
+   */
+  private static ResolvedMessageMember resolveIfBlockMember(
+      ParsedMessageType parsedMessageType,
+      String currentNamespace,
+      ParsedIfBlock parsedIfBlock,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    if (parsedIfBlock.test().isBlank()) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_IF_TEST",
+              "if@test must not be blank in message " + parsedMessageType.name() + ".",
+              context.sourcePath));
+    }
+    if (parsedIfBlock.members().isEmpty()) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_EMPTY_IF_BLOCK",
+              "if block in message " + parsedMessageType.name() + " must contain members.",
+              context.sourcePath));
+    }
+
+    MessageResolutionState ifState =
+        new MessageResolutionState(messageState.previousPrimitiveFieldNames);
+    List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
+    for (ParsedMessageMember nestedMember : parsedIfBlock.members()) {
+      ResolvedMessageMember resolvedMember =
+          resolveMessageMember(parsedMessageType, currentNamespace, nestedMember, ifState, context);
+      if (resolvedMember != null) {
+        resolvedMembers.add(resolvedMember);
+      }
+    }
+    return new ResolvedIfBlock(parsedIfBlock.test(), resolvedMembers);
+  }
+
+  /**
+   * Resolves one nested parsed {@code type} member.
+   *
+   * @param parsedMessageType parsed parent message definition
+   * @param currentNamespace effective namespace currently active for this message
+   * @param nestedType parsed nested message definition
+   * @param messageState per-message resolution state
+   * @param context shared semantic-resolution state
+   * @return resolved nested message member
+   */
+  private static ResolvedMessageMember resolveNestedTypeMember(
+      ParsedMessageType parsedMessageType,
+      String currentNamespace,
+      ParsedMessageType nestedType,
+      MessageResolutionState messageState,
+      ResolutionContext context) {
+    validateIdentifier(
+        nestedType.name(),
+        "SEMANTIC_INVALID_NESTED_TYPE_NAME",
+        "Nested type name must be a valid identifier in message " + parsedMessageType.name() + ": ",
+        context.sourcePath,
+        context.diagnostics);
+    registerDuplicateMemberName(
+        parsedMessageType.name(), nestedType.name(), messageState.namedMembers, context);
+
+    if (nestedType.namespaceOverride() != null) {
+      validateNamespace(
+          nestedType.namespaceOverride(),
+          "type@namespace",
+          context.sourcePath,
+          context.diagnostics);
+    }
+    if (nestedType.members().isEmpty()) {
+      context.diagnostics.add(
+          error(
+              "SEMANTIC_EMPTY_NESTED_TYPE",
+              "Nested type "
+                  + nestedType.name()
+                  + " in message "
+                  + parsedMessageType.name()
+                  + " must contain members.",
+              context.sourcePath));
+    }
+
+    return resolveMessageType(currentNamespace, nestedType, context);
+  }
+
+  /**
    * Adds a duplicate-member diagnostic when a message member name is repeated.
    *
    * @param messageTypeName parent message name
@@ -1012,6 +1295,9 @@ public final class SemanticResolver {
     }
     if (context.reusableBlobVectorByName.containsKey(typeName)) {
       return new BlobVectorTypeRef(typeName);
+    }
+    if (context.reusableVarStringByName.containsKey(typeName)) {
+      return new VarStringTypeRef(typeName);
     }
 
     context.diagnostics.add(
@@ -1316,6 +1602,7 @@ public final class SemanticResolver {
     private final Map<String, ParsedVector> reusableVectorByName;
     private final Map<String, ParsedBlobArray> reusableBlobArrayByName;
     private final Map<String, ParsedBlobVector> reusableBlobVectorByName;
+    private final Map<String, ParsedVarString> reusableVarStringByName;
     private final Set<String> globalTypeNames;
 
     /**
@@ -1333,6 +1620,7 @@ public final class SemanticResolver {
       reusableVectorByName = new LinkedHashMap<>();
       reusableBlobArrayByName = new LinkedHashMap<>();
       reusableBlobVectorByName = new LinkedHashMap<>();
+      reusableVarStringByName = new LinkedHashMap<>();
       globalTypeNames = new HashSet<>();
     }
   }
@@ -1347,6 +1635,9 @@ public final class SemanticResolver {
    * @param reusableVectors resolved schema-level reusable vectors
    * @param reusableBlobArrays resolved schema-level reusable blob arrays
    * @param reusableBlobVectors resolved schema-level reusable blob vectors
+   * @param reusableVarStrings resolved schema-level reusable varStrings
+   * @param reusableChecksums resolved schema-level reusable checksums
+   * @param reusablePads resolved schema-level reusable pads
    */
   private record ReusableResolution(
       List<ResolvedBitField> reusableBitFields,
@@ -1355,12 +1646,31 @@ public final class SemanticResolver {
       List<ResolvedArray> reusableArrays,
       List<ResolvedVector> reusableVectors,
       List<ResolvedBlobArray> reusableBlobArrays,
-      List<ResolvedBlobVector> reusableBlobVectors) {}
+      List<ResolvedBlobVector> reusableBlobVectors,
+      List<ResolvedVarString> reusableVarStrings,
+      List<ResolvedChecksum> reusableChecksums,
+      List<ResolvedPad> reusablePads) {}
 
   /** Per-message state used while resolving message members in declaration order. */
   private static final class MessageResolutionState {
     private final Set<String> namedMembers = new HashSet<>();
     private final Set<String> previousPrimitiveFieldNames = new HashSet<>();
+
+    /**
+     * Creates an empty message-resolution state.
+     *
+     * <p>Use this for full message scopes where no inherited count-field names are needed.
+     */
+    private MessageResolutionState() {}
+
+    /**
+     * Creates a nested-scope state that inherits earlier primitive count-field names.
+     *
+     * @param inheritedCountFields primitive scalar field names visible to this nested scope
+     */
+    private MessageResolutionState(Set<String> inheritedCountFields) {
+      previousPrimitiveFieldNames.addAll(inheritedCountFields);
+    }
   }
 
   /**

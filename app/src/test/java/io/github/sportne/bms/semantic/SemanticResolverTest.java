@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBitFlag;
@@ -15,22 +16,32 @@ import io.github.sportne.bms.model.parsed.ParsedBitSegment;
 import io.github.sportne.bms.model.parsed.ParsedBitVariant;
 import io.github.sportne.bms.model.parsed.ParsedBlobArray;
 import io.github.sportne.bms.model.parsed.ParsedBlobVector;
+import io.github.sportne.bms.model.parsed.ParsedChecksum;
 import io.github.sportne.bms.model.parsed.ParsedCountFieldLength;
 import io.github.sportne.bms.model.parsed.ParsedField;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedIfBlock;
 import io.github.sportne.bms.model.parsed.ParsedLengthMode;
 import io.github.sportne.bms.model.parsed.ParsedMessageType;
+import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorValueLength;
+import io.github.sportne.bms.model.parsed.ParsedVarString;
 import io.github.sportne.bms.model.parsed.ParsedVector;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
 import io.github.sportne.bms.model.resolved.FloatTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
+import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
+import io.github.sportne.bms.model.resolved.ResolvedMessageType;
+import io.github.sportne.bms.model.resolved.ResolvedPad;
+import io.github.sportne.bms.model.resolved.ResolvedVarString;
 import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
+import io.github.sportne.bms.model.resolved.VarStringTypeRef;
 import io.github.sportne.bms.model.resolved.VectorTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import java.math.BigDecimal;
@@ -616,6 +627,166 @@ class SemanticResolverTest {
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_UNKNOWN_TYPE")));
+  }
+
+  /** Contract: milestone-03 members resolve and keep order in the resolved model. */
+  @Test
+  void semanticResolverResolvesMilestoneThreeMembers() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("nameLength", "uint8", null, null, null, "name length"),
+                        new ParsedVarString(
+                            "name",
+                            StringEncoding.UTF8,
+                            "name",
+                            new ParsedCountFieldLength("nameLength")),
+                        new ParsedField(
+                            "label", "ReusableLabel", null, null, null, "reusable varString"),
+                        new ParsedPad(2, "alignment"),
+                        new ParsedChecksum("crc16", "0..7", "checksum"),
+                        new ParsedIfBlock(
+                            "version == 1",
+                            List.of(
+                                new ParsedField("mode", "uint8", null, null, null, "mode"),
+                                new ParsedMessageType(
+                                    "ConditionalType",
+                                    "conditional type",
+                                    null,
+                                    List.of(
+                                        new ParsedField(
+                                            "payload", "uint16", null, null, null, "payload"))))),
+                        new ParsedMessageType(
+                            "InlineType",
+                            "inline type",
+                            null,
+                            List.of(
+                                new ParsedField(
+                                    "value", "uint8", null, null, null, "nested value")))))),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new ParsedVarString(
+                    "ReusableLabel",
+                    StringEncoding.ASCII,
+                    "label",
+                    new ParsedTerminatorValueLength("00"))),
+            List.of(new ParsedChecksum("crc32", "0..3", "root checksum")),
+            List.of(new ParsedPad(1, "root pad")));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+    var message = resolved.messageTypes().get(0);
+
+    assertEquals(1, resolved.reusableVarStrings().size());
+    assertEquals(1, resolved.reusableChecksums().size());
+    assertEquals(1, resolved.reusablePads().size());
+
+    var fieldByName =
+        message.fields().stream()
+            .collect(java.util.stream.Collectors.toMap(field -> field.name(), field -> field));
+    assertInstanceOf(VarStringTypeRef.class, fieldByName.get("label").typeRef());
+    assertTrue(message.members().get(1) instanceof ResolvedVarString);
+    assertTrue(message.members().get(3) instanceof ResolvedPad);
+    assertTrue(message.members().get(4) instanceof ResolvedChecksum);
+    assertTrue(message.members().get(5) instanceof ResolvedIfBlock);
+    assertTrue(message.members().get(6) instanceof ResolvedMessageType);
+  }
+
+  /** Contract: varString count-field refs must target earlier primitive scalar fields. */
+  @Test
+  void semanticResolverRejectsVarStringCountFieldRefToLaterField() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedVarString(
+                            "name",
+                            StringEncoding.UTF8,
+                            "name",
+                            new ParsedCountFieldLength("nameLength")),
+                        new ParsedField("nameLength", "uint8", null, null, null, "length")))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_COUNT_FIELD_REF")));
+  }
+
+  /** Contract: semantic validation checks empty/blank conditional and nested message structure. */
+  @Test
+  void semanticResolverRejectsInvalidConditionalAndNestedStructure() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedIfBlock(" ", List.of()),
+                        new ParsedMessageType("Nested", "nested", "bad..namespace", List.of())))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_IF_TEST")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_EMPTY_IF_BLOCK")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_EMPTY_NESTED_TYPE")));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_NAMESPACE")));
+  }
+
+  /** Contract: names inside an `if` block use their own scope and may repeat parent names. */
+  @Test
+  void semanticResolverAllowsNameReuseBetweenMessageAndIfScope() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("value", "uint8", null, null, null, "parent value"),
+                        new ParsedIfBlock(
+                            "always",
+                            List.of(
+                                new ParsedField(
+                                    "value", "uint8", null, null, null, "if-scope value")))))));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+
+    assertEquals(2, resolved.messageTypes().get(0).members().size());
+    assertInstanceOf(ResolvedIfBlock.class, resolved.messageTypes().get(0).members().get(1));
   }
 
   /** Contract: duplicate reusable names are rejected across all reusable collection/type groups. */

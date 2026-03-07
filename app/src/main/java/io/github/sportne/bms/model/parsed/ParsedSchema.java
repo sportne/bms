@@ -18,6 +18,9 @@ import java.util.Objects;
  * @param reusableVectors schema-level reusable vector definitions
  * @param reusableBlobArrays schema-level reusable blob-array definitions
  * @param reusableBlobVectors schema-level reusable blob-vector definitions
+ * @param reusableVarStrings schema-level reusable varString definitions
+ * @param reusableChecksums schema-level checksum definitions
+ * @param reusablePads schema-level pad definitions
  */
 public record ParsedSchema(
     String namespace,
@@ -28,7 +31,10 @@ public record ParsedSchema(
     List<ParsedArray> reusableArrays,
     List<ParsedVector> reusableVectors,
     List<ParsedBlobArray> reusableBlobArrays,
-    List<ParsedBlobVector> reusableBlobVectors) {
+    List<ParsedBlobVector> reusableBlobVectors,
+    List<ParsedVarString> reusableVarStrings,
+    List<ParsedChecksum> reusableChecksums,
+    List<ParsedPad> reusablePads) {
   /**
    * Creates a parsed schema object.
    *
@@ -41,6 +47,9 @@ public record ParsedSchema(
    * @param reusableVectors parsed reusable vectors
    * @param reusableBlobArrays parsed reusable blob arrays
    * @param reusableBlobVectors parsed reusable blob vectors
+   * @param reusableVarStrings parsed reusable varStrings
+   * @param reusableChecksums parsed reusable checksums
+   * @param reusablePads parsed reusable pads
    */
   public ParsedSchema {
     namespace = Objects.requireNonNull(namespace, "namespace");
@@ -55,6 +64,10 @@ public record ParsedSchema(
         List.copyOf(Objects.requireNonNull(reusableBlobArrays, "reusableBlobArrays"));
     reusableBlobVectors =
         List.copyOf(Objects.requireNonNull(reusableBlobVectors, "reusableBlobVectors"));
+    reusableVarStrings =
+        List.copyOf(Objects.requireNonNull(reusableVarStrings, "reusableVarStrings"));
+    reusableChecksums = List.copyOf(Objects.requireNonNull(reusableChecksums, "reusableChecksums"));
+    reusablePads = List.copyOf(Objects.requireNonNull(reusablePads, "reusablePads"));
   }
 
   /**
@@ -69,6 +82,9 @@ public record ParsedSchema(
     this(
         namespace,
         messageTypes,
+        List.of(),
+        List.of(),
+        List.of(),
         List.of(),
         List.of(),
         List.of(),
@@ -100,6 +116,47 @@ public record ParsedSchema(
         reusableFloats,
         reusableScaledInts,
         List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of());
+  }
+
+  /**
+   * Compatibility constructor that keeps the pre-milestone reusable-type parameter list.
+   *
+   * @param namespace schema-level logical namespace
+   * @param messageTypes parsed message type definitions
+   * @param reusableBitFields schema-level reusable bitfield definitions
+   * @param reusableFloats schema-level reusable float definitions
+   * @param reusableScaledInts schema-level reusable scaled-int definitions
+   * @param reusableArrays schema-level reusable array definitions
+   * @param reusableVectors schema-level reusable vector definitions
+   * @param reusableBlobArrays schema-level reusable blob-array definitions
+   * @param reusableBlobVectors schema-level reusable blob-vector definitions
+   */
+  public ParsedSchema(
+      String namespace,
+      List<ParsedMessageType> messageTypes,
+      List<ParsedBitField> reusableBitFields,
+      List<ParsedFloat> reusableFloats,
+      List<ParsedScaledInt> reusableScaledInts,
+      List<ParsedArray> reusableArrays,
+      List<ParsedVector> reusableVectors,
+      List<ParsedBlobArray> reusableBlobArrays,
+      List<ParsedBlobVector> reusableBlobVectors) {
+    this(
+        namespace,
+        messageTypes,
+        reusableBitFields,
+        reusableFloats,
+        reusableScaledInts,
+        reusableArrays,
+        reusableVectors,
+        reusableBlobArrays,
+        reusableBlobVectors,
         List.of(),
         List.of(),
         List.of());

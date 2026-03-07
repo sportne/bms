@@ -13,13 +13,16 @@ same bytes.
 The current foundation supports a small but complete path:
 
 - XSD validation
-- XML parsing for `schema`, `messageType`, and `field`
+- XML parsing for core members (`field`, `bitField`, `float`, `scaledInt`)
+- XML parsing for collections (`array`, `vector`, `blobArray`, `blobVector`, `terminatorField`)
+- XML parsing for conditional/string members (`varString`, `pad`, `checksum`, `if`, nested `type`)
 - semantic checks (namespaces, type references, duplicate names)
 - Java code generation
 - C++ scaffold generation
 
-The project intentionally fails fast for XML elements that are valid in the XSD
-but not implemented yet in the parser.
+The parser still fails fast for truly unknown XML elements that are not part of the schema.
+The generators are intentionally narrower than the parser right now, so unsupported
+member kinds fail with clear diagnostics during `generate`.
 
 ## Why two models?
 

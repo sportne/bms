@@ -13,4 +13,9 @@ public sealed interface ResolvedMessageMember
         ResolvedArray,
         ResolvedVector,
         ResolvedBlobArray,
-        ResolvedBlobVector {}
+        ResolvedBlobVector,
+        ResolvedVarString,
+        ResolvedPad,
+        ResolvedChecksum,
+        ResolvedIfBlock,
+        ResolvedMessageType {}

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.frontend3">
+  <varString name="LabelText" encoding="utf8" comment="Reusable label text">
+    <terminatorValue value="00"/>
+  </varString>
+  <checksum alg="crc32" range="0..15" comment="Reusable checksum"/>
+  <pad bytes="2" comment="Reusable pad"/>
+
+  <messageType name="FrontendThreeFrame" comment="Covers varString, pad, checksum, if, and type">
+    <field name="nameLength" type="uint8" comment="Length prefix for deviceName"/>
+    <varString name="deviceName" encoding="utf8" comment="Device display name">
+      <countField ref="nameLength"/>
+    </varString>
+    <field name="reusableLabel" type="LabelText" comment="Reusable varString by type reference"/>
+    <pad bytes="1" comment="Byte alignment"/>
+    <checksum alg="crc16" range="0..7" comment="Message checksum"/>
+    <if test="version == 1">
+      <field name="mode" type="uint8" comment="Mode when version is one"/>
+      <varString name="modeText" encoding="ascii" comment="Mode text">
+        <terminatorValue value="00"/>
+      </varString>
+      <type name="ConditionalPayload" comment="Nested message inside if">
+        <field name="payloadValue" type="uint16" comment="Payload value"/>
+      </type>
+    </if>
+    <type name="InlinePayload" comment="Always-present nested message">
+      <field name="payloadByte" type="uint8" comment="Payload byte"/>
+    </type>
+  </messageType>
+</schema>

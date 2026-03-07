@@ -15,7 +15,8 @@ import java.util.Objects;
  * @param members resolved members in exact declaration order
  */
 public record ResolvedMessageType(
-    String name, String comment, String effectiveNamespace, List<ResolvedMessageMember> members) {
+    String name, String comment, String effectiveNamespace, List<ResolvedMessageMember> members)
+    implements ResolvedMessageMember {
   /**
    * Creates a resolved message type.
    *

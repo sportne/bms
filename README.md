@@ -45,17 +45,32 @@ bms generate <spec.xml> --java <out/java> [--cpp <out/cpp>]
 The current foundation runs these steps in order:
 
 1. Validate XML against the XSD.
-2. Parse XML into a simple parsed model (`schema`, `messageType`, `field`).
+2. Parse XML into a parsed model.
 3. Run semantic checks (for example: unknown types, duplicate fields, namespace format).
 4. Build a resolved model that generators can safely use.
 5. Generate Java and/or C++ output files.
 
 This order matters because each step simplifies the next step.
 
-Current parser support is intentionally narrow for foundation v1:
-- root `schema`
-- `messageType`
+Current front-end parser/semantic support includes:
 - `field`
+- `bitField` (`flag`, `segment`, `variant`)
+- `float`
+- `scaledInt`
+- `array`
+- `vector`
+- `blobArray`
+- `blobVector`
+- `terminatorField`/`terminatorMatch`
+- `varString`
+- `pad`
+- `checksum`
+- `if`
+- nested `type`
+
+Current Java/C++ backend emission is intentionally narrower:
+- foundation scalar fields and message references are generated
+- unsupported member kinds fail with clear diagnostics during `generate`
 
 The spec now requires `schema@namespace` and allows `messageType@namespace` override.
 

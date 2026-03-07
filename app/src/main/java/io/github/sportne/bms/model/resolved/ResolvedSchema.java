@@ -17,6 +17,9 @@ import java.util.Objects;
  * @param reusableVectors schema-level reusable vector definitions
  * @param reusableBlobArrays schema-level reusable blob-array definitions
  * @param reusableBlobVectors schema-level reusable blob-vector definitions
+ * @param reusableVarStrings schema-level reusable varString definitions
+ * @param reusableChecksums schema-level checksum definitions
+ * @param reusablePads schema-level pad definitions
  */
 public record ResolvedSchema(
     String namespace,
@@ -27,7 +30,10 @@ public record ResolvedSchema(
     List<ResolvedArray> reusableArrays,
     List<ResolvedVector> reusableVectors,
     List<ResolvedBlobArray> reusableBlobArrays,
-    List<ResolvedBlobVector> reusableBlobVectors) {
+    List<ResolvedBlobVector> reusableBlobVectors,
+    List<ResolvedVarString> reusableVarStrings,
+    List<ResolvedChecksum> reusableChecksums,
+    List<ResolvedPad> reusablePads) {
   /**
    * Creates a resolved schema object.
    *
@@ -40,6 +46,9 @@ public record ResolvedSchema(
    * @param reusableVectors resolved reusable vectors
    * @param reusableBlobArrays resolved reusable blob arrays
    * @param reusableBlobVectors resolved reusable blob vectors
+   * @param reusableVarStrings resolved reusable varStrings
+   * @param reusableChecksums resolved reusable checksums
+   * @param reusablePads resolved reusable pads
    */
   public ResolvedSchema {
     namespace = Objects.requireNonNull(namespace, "namespace");
@@ -54,6 +63,10 @@ public record ResolvedSchema(
         List.copyOf(Objects.requireNonNull(reusableBlobArrays, "reusableBlobArrays"));
     reusableBlobVectors =
         List.copyOf(Objects.requireNonNull(reusableBlobVectors, "reusableBlobVectors"));
+    reusableVarStrings =
+        List.copyOf(Objects.requireNonNull(reusableVarStrings, "reusableVarStrings"));
+    reusableChecksums = List.copyOf(Objects.requireNonNull(reusableChecksums, "reusableChecksums"));
+    reusablePads = List.copyOf(Objects.requireNonNull(reusablePads, "reusablePads"));
   }
 
   /**
@@ -68,6 +81,9 @@ public record ResolvedSchema(
     this(
         namespace,
         messageTypes,
+        List.of(),
+        List.of(),
+        List.of(),
         List.of(),
         List.of(),
         List.of(),
@@ -99,6 +115,47 @@ public record ResolvedSchema(
         reusableFloats,
         reusableScaledInts,
         List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of());
+  }
+
+  /**
+   * Compatibility constructor that keeps the pre-milestone reusable-type parameter list.
+   *
+   * @param namespace schema-level logical namespace
+   * @param messageTypes resolved message type definitions
+   * @param reusableBitFields schema-level reusable bitfield definitions
+   * @param reusableFloats schema-level reusable float definitions
+   * @param reusableScaledInts schema-level reusable scaled-int definitions
+   * @param reusableArrays schema-level reusable array definitions
+   * @param reusableVectors schema-level reusable vector definitions
+   * @param reusableBlobArrays schema-level reusable blob-array definitions
+   * @param reusableBlobVectors schema-level reusable blob-vector definitions
+   */
+  public ResolvedSchema(
+      String namespace,
+      List<ResolvedMessageType> messageTypes,
+      List<ResolvedBitField> reusableBitFields,
+      List<ResolvedFloat> reusableFloats,
+      List<ResolvedScaledInt> reusableScaledInts,
+      List<ResolvedArray> reusableArrays,
+      List<ResolvedVector> reusableVectors,
+      List<ResolvedBlobArray> reusableBlobArrays,
+      List<ResolvedBlobVector> reusableBlobVectors) {
+    this(
+        namespace,
+        messageTypes,
+        reusableBitFields,
+        reusableFloats,
+        reusableScaledInts,
+        reusableArrays,
+        reusableVectors,
+        reusableBlobArrays,
+        reusableBlobVectors,
         List.of(),
         List.of(),
         List.of());

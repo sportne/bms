@@ -4,6 +4,7 @@ import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBitFlag;
@@ -11,18 +12,22 @@ import io.github.sportne.bms.model.parsed.ParsedBitSegment;
 import io.github.sportne.bms.model.parsed.ParsedBitVariant;
 import io.github.sportne.bms.model.parsed.ParsedBlobArray;
 import io.github.sportne.bms.model.parsed.ParsedBlobVector;
+import io.github.sportne.bms.model.parsed.ParsedChecksum;
 import io.github.sportne.bms.model.parsed.ParsedCountFieldLength;
 import io.github.sportne.bms.model.parsed.ParsedField;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedIfBlock;
 import io.github.sportne.bms.model.parsed.ParsedLengthMode;
 import io.github.sportne.bms.model.parsed.ParsedMessageMember;
 import io.github.sportne.bms.model.parsed.ParsedMessageType;
+import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorMatch;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorNode;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorValueLength;
+import io.github.sportne.bms.model.parsed.ParsedVarString;
 import io.github.sportne.bms.model.parsed.ParsedVector;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
@@ -56,6 +61,11 @@ import javax.xml.stream.XMLStreamReader;
  *   <li>{@code <vector>}
  *   <li>{@code <blobArray>}
  *   <li>{@code <blobVector>}
+ *   <li>{@code <varString>}
+ *   <li>{@code <pad>}
+ *   <li>{@code <checksum>}
+ *   <li>{@code <if>}
+ *   <li>{@code <type>} (nested message)
  * </ul>
  *
  * <p>If an unsupported XML element appears, parsing fails fast with a clear diagnostic.
@@ -102,7 +112,10 @@ public final class SpecParser {
             rootItems.arrays(),
             rootItems.vectors(),
             rootItems.blobArrays(),
-            rootItems.blobVectors());
+            rootItems.blobVectors(),
+            rootItems.varStrings(),
+            rootItems.checksums(),
+            rootItems.pads());
       } finally {
         reader.close();
       }
@@ -163,25 +176,41 @@ public final class SpecParser {
     List<ParsedVector> vectors = new ArrayList<>();
     List<ParsedBlobArray> blobArrays = new ArrayList<>();
     List<ParsedBlobVector> blobVectors = new ArrayList<>();
+    List<ParsedVarString> varStrings = new ArrayList<>();
+    List<ParsedChecksum> checksums = new ArrayList<>();
+    List<ParsedPad> pads = new ArrayList<>();
 
     while (reader.hasNext()) {
       int event = reader.next();
       if (event == XMLStreamConstants.START_ELEMENT) {
-        switch (reader.getLocalName()) {
-          case "messageType" -> messageTypes.add(parseMessageType(specPath, reader));
-          case "bitField" -> bitFields.add(parseBitField(specPath, reader));
-          case "float" -> floats.add(parseFloat(specPath, reader));
-          case "scaledInt" -> scaledInts.add(parseScaledInt(specPath, reader));
-          case "array" -> arrays.add(parseArray(specPath, reader));
-          case "vector" -> vectors.add(parseVector(specPath, reader));
-          case "blobArray" -> blobArrays.add(parseBlobArray(specPath, reader));
-          case "blobVector" -> blobVectors.add(parseBlobVector(specPath, reader));
-          default -> throw unsupportedElement(specPath, reader, "root");
-        }
+        parseRootChild(
+            specPath,
+            reader,
+            messageTypes,
+            bitFields,
+            floats,
+            scaledInts,
+            arrays,
+            vectors,
+            blobArrays,
+            blobVectors,
+            varStrings,
+            checksums,
+            pads);
       }
       if (event == XMLStreamConstants.END_ELEMENT && ROOT_ELEMENT.equals(reader.getLocalName())) {
         return new RootItems(
-            messageTypes, bitFields, floats, scaledInts, arrays, vectors, blobArrays, blobVectors);
+            messageTypes,
+            bitFields,
+            floats,
+            scaledInts,
+            arrays,
+            vectors,
+            blobArrays,
+            blobVectors,
+            varStrings,
+            checksums,
+            pads);
       }
     }
 
@@ -191,6 +220,56 @@ public final class SpecParser {
         specPath,
         -1,
         -1);
+  }
+
+  /**
+   * Parses one supported child element under {@code <schema>} and adds it to the right list.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on a root child element
+   * @param messageTypes destination list for parsed message types
+   * @param bitFields destination list for parsed bitFields
+   * @param floats destination list for parsed floats
+   * @param scaledInts destination list for parsed scaledInts
+   * @param arrays destination list for parsed arrays
+   * @param vectors destination list for parsed vectors
+   * @param blobArrays destination list for parsed blobArrays
+   * @param blobVectors destination list for parsed blobVectors
+   * @param varStrings destination list for parsed varStrings
+   * @param checksums destination list for parsed checksums
+   * @param pads destination list for parsed pads
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if the current root child is unsupported
+   */
+  private void parseRootChild(
+      Path specPath,
+      XMLStreamReader reader,
+      List<ParsedMessageType> messageTypes,
+      List<ParsedBitField> bitFields,
+      List<ParsedFloat> floats,
+      List<ParsedScaledInt> scaledInts,
+      List<ParsedArray> arrays,
+      List<ParsedVector> vectors,
+      List<ParsedBlobArray> blobArrays,
+      List<ParsedBlobVector> blobVectors,
+      List<ParsedVarString> varStrings,
+      List<ParsedChecksum> checksums,
+      List<ParsedPad> pads)
+      throws XMLStreamException, BmsException {
+    switch (reader.getLocalName()) {
+      case "messageType" -> messageTypes.add(parseMessageType(specPath, reader));
+      case "bitField" -> bitFields.add(parseBitField(specPath, reader));
+      case "float" -> floats.add(parseFloat(specPath, reader));
+      case "scaledInt" -> scaledInts.add(parseScaledInt(specPath, reader));
+      case "array" -> arrays.add(parseArray(specPath, reader));
+      case "vector" -> vectors.add(parseVector(specPath, reader));
+      case "blobArray" -> blobArrays.add(parseBlobArray(specPath, reader));
+      case "blobVector" -> blobVectors.add(parseBlobVector(specPath, reader));
+      case "varString" -> varStrings.add(parseVarString(specPath, reader));
+      case "checksum" -> checksums.add(parseChecksum(specPath, reader));
+      case "pad" -> pads.add(parsePad(specPath, reader));
+      default -> throw unsupportedElement(specPath, reader, "root");
+    }
   }
 
   /**
@@ -204,37 +283,116 @@ public final class SpecParser {
    */
   private ParsedMessageType parseMessageType(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
+    return parseMessageTypeLike(specPath, reader, "messageType");
+  }
+
+  /**
+   * Parses one nested {@code <type>} member.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <type>}
+   * @return parsed nested message type
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or child elements are invalid
+   */
+  private ParsedMessageType parseTypeMember(Path specPath, XMLStreamReader reader)
+      throws XMLStreamException, BmsException {
+    return parseMessageTypeLike(specPath, reader, "type");
+  }
+
+  /**
+   * Parses one message-like element ({@code messageType} or nested {@code type}).
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on the message-like element
+   * @param elementName element name that terminates this parse call
+   * @return parsed message object
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or child elements are invalid
+   */
+  private ParsedMessageType parseMessageTypeLike(
+      Path specPath, XMLStreamReader reader, String elementName)
+      throws XMLStreamException, BmsException {
     String name = requireAttribute(specPath, reader, "name");
     String comment = requireAttribute(specPath, reader, "comment");
     String namespaceOverride = reader.getAttributeValue(null, "namespace");
 
+    List<ParsedMessageMember> members = parseMessageMembers(specPath, reader, elementName, true);
+    return new ParsedMessageType(name, comment, namespaceOverride, members);
+  }
+
+  /**
+   * Parses ordered message members under a parent that uses message-member choices.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on the parent element
+   * @param parentName parent element that will end this parse call
+   * @param allowIf whether nested {@code if} blocks are allowed in this parent
+   * @return parsed members in XML declaration order
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if child elements are invalid or unsupported
+   */
+  private List<ParsedMessageMember> parseMessageMembers(
+      Path specPath, XMLStreamReader reader, String parentName, boolean allowIf)
+      throws XMLStreamException, BmsException {
     List<ParsedMessageMember> members = new ArrayList<>();
     while (reader.hasNext()) {
       int event = reader.next();
       if (event == XMLStreamConstants.START_ELEMENT) {
-        switch (reader.getLocalName()) {
-          case "field" -> members.add(parseField(specPath, reader));
-          case "bitField" -> members.add(parseBitField(specPath, reader));
-          case "float" -> members.add(parseFloat(specPath, reader));
-          case "scaledInt" -> members.add(parseScaledInt(specPath, reader));
-          case "array" -> members.add(parseArray(specPath, reader));
-          case "vector" -> members.add(parseVector(specPath, reader));
-          case "blobArray" -> members.add(parseBlobArray(specPath, reader));
-          case "blobVector" -> members.add(parseBlobVector(specPath, reader));
-          default -> throw unsupportedElement(specPath, reader, "messageType");
-        }
+        members.add(parseMessageMember(specPath, reader, parentName, allowIf));
       }
-      if (event == XMLStreamConstants.END_ELEMENT && "messageType".equals(reader.getLocalName())) {
-        return new ParsedMessageType(name, comment, namespaceOverride, members);
+      if (event == XMLStreamConstants.END_ELEMENT && parentName.equals(reader.getLocalName())) {
+        return members;
       }
     }
 
     throw singleDiagnosticException(
         "PARSER_UNEXPECTED_EOF",
-        "Unexpected end of file while reading <messageType>.",
+        "Unexpected end of file while reading <" + parentName + ">.",
         specPath,
         -1,
         -1);
+  }
+
+  /**
+   * Parses one message member child from the current reader position.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on a member element
+   * @param parentName parent element name used in diagnostics
+   * @param allowIf whether nested {@code if} blocks are allowed in this parent
+   * @return parsed message member
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if the member is invalid or unsupported
+   */
+  private ParsedMessageMember parseMessageMember(
+      Path specPath, XMLStreamReader reader, String parentName, boolean allowIf)
+      throws XMLStreamException, BmsException {
+    return switch (reader.getLocalName()) {
+      case "field" -> parseField(specPath, reader);
+      case "bitField" -> parseBitField(specPath, reader);
+      case "float" -> parseFloat(specPath, reader);
+      case "scaledInt" -> parseScaledInt(specPath, reader);
+      case "array" -> parseArray(specPath, reader);
+      case "vector" -> parseVector(specPath, reader);
+      case "blobArray" -> parseBlobArray(specPath, reader);
+      case "blobVector" -> parseBlobVector(specPath, reader);
+      case "varString" -> parseVarString(specPath, reader);
+      case "checksum" -> parseChecksum(specPath, reader);
+      case "pad" -> parsePad(specPath, reader);
+      case "type" -> parseTypeMember(specPath, reader);
+      case "if" -> {
+        if (!allowIf) {
+          throw parserError(
+              specPath,
+              reader,
+              "PARSER_UNSUPPORTED_ELEMENT",
+              "<" + parentName + "> does not support nested <if>.");
+        }
+        yield parseIfBlock(specPath, reader);
+      }
+      default -> throw unsupportedElement(specPath, reader, parentName);
+    };
   }
 
   /**
@@ -561,7 +719,89 @@ public final class SpecParser {
   }
 
   /**
-   * Parses exactly one vector/blobVector length mode child.
+   * Parses one {@code <varString>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <varString>}
+   * @return parsed varString
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or nested length-mode children are invalid
+   */
+  private ParsedVarString parseVarString(Path specPath, XMLStreamReader reader)
+      throws XMLStreamException, BmsException {
+    String name = requireAttribute(specPath, reader, "name");
+    String encodingValue = requireAttribute(specPath, reader, "encoding");
+    String comment = requireAttribute(specPath, reader, "comment");
+    StringEncoding encoding;
+    try {
+      encoding = StringEncoding.fromXml(encodingValue);
+    } catch (IllegalArgumentException exception) {
+      throw parserError(
+          specPath,
+          reader,
+          "PARSER_INVALID_ATTRIBUTE",
+          "Unsupported varString encoding value: " + encodingValue);
+    }
+
+    ParsedLengthMode lengthMode = parseLengthMode(specPath, reader, "varString", false);
+    return new ParsedVarString(name, encoding, comment, lengthMode);
+  }
+
+  /**
+   * Parses one {@code <checksum>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <checksum>}
+   * @return parsed checksum
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if required attributes are missing
+   */
+  private ParsedChecksum parseChecksum(Path specPath, XMLStreamReader reader)
+      throws XMLStreamException, BmsException {
+    String algorithm = requireAttribute(specPath, reader, "alg");
+    String range = requireAttribute(specPath, reader, "range");
+    String comment = requireAttribute(specPath, reader, "comment");
+    expectNoNestedElements(specPath, reader, "checksum");
+    return new ParsedChecksum(algorithm, range, comment);
+  }
+
+  /**
+   * Parses one {@code <pad>} element.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <pad>}
+   * @return parsed pad
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes are missing or invalid
+   */
+  private ParsedPad parsePad(Path specPath, XMLStreamReader reader)
+      throws XMLStreamException, BmsException {
+    int bytes =
+        parsePositiveInteger(
+            specPath, reader, "bytes", requireAttribute(specPath, reader, "bytes"));
+    String comment = reader.getAttributeValue(null, "comment");
+    expectNoNestedElements(specPath, reader, "pad");
+    return new ParsedPad(bytes, comment);
+  }
+
+  /**
+   * Parses one {@code <if>} block and the members inside it.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <if>}
+   * @return parsed conditional block
+   * @throws XMLStreamException if XML streaming fails
+   * @throws BmsException if attributes or child elements are invalid
+   */
+  private ParsedIfBlock parseIfBlock(Path specPath, XMLStreamReader reader)
+      throws XMLStreamException, BmsException {
+    String test = requireAttribute(specPath, reader, "test");
+    List<ParsedMessageMember> members = parseMessageMembers(specPath, reader, "if", false);
+    return new ParsedIfBlock(test, members);
+  }
+
+  /**
+   * Parses exactly one vector/blobVector/varString length mode child.
    *
    * @param specPath source file path used in diagnostics
    * @param reader active XML reader positioned on the parent element
@@ -1010,5 +1250,8 @@ public final class SpecParser {
       List<ParsedArray> arrays,
       List<ParsedVector> vectors,
       List<ParsedBlobArray> blobArrays,
-      List<ParsedBlobVector> blobVectors) {}
+      List<ParsedBlobVector> blobVectors,
+      List<ParsedVarString> varStrings,
+      List<ParsedChecksum> checksums,
+      List<ParsedPad> pads) {}
 }

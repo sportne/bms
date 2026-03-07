@@ -2,9 +2,10 @@
 
 ## P0
 
-- [ ] Add parser + semantic support for deferred front-end constructs (`varString`, `if`, nested `type`, `checksum`, `pad`).
 - [ ] Implement Java backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
+- [ ] Implement Java backend emission for conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`).
 - [ ] Implement C++ backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
+- [ ] Implement C++ backend emission for conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`).
 - [ ] Expand end-to-end specs so at least one example covers each supported front-end construct.
 
 ## P1
