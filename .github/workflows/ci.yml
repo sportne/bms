@@ -27,3 +27,30 @@ jobs:
 
       - name: Run Gradle check
         run: ./gradlew check --no-daemon
+
+  native:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up GraalVM 21
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          java-version: "21"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: "true"
+
+      - name: Export GRAALVM_HOME
+        run: echo "GRAALVM_HOME=${JAVA_HOME}" >> "$GITHUB_ENV"
+
+      - name: Verify native-image
+        run: native-image --version
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Build native image
+        run: ./gradlew :app:nativeCompile --no-daemon --no-configuration-cache
