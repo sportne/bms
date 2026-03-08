@@ -41,8 +41,8 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * Contract tests for the C++ generator.
  *
- * <p>These tests verify deterministic output for supported fixtures and explicit failures for
- * deferred fixture features.
+ * <p>These tests verify deterministic output for supported fixtures and explicit diagnostics for
+ * intentionally invalid resolved models.
  */
 class CppCodeGeneratorTest {
 
@@ -100,23 +100,37 @@ class CppCodeGeneratorTest {
     assertTrue(Files.exists(outputDirectory.resolve("acme/telemetry/coverage/shared/Child.hpp")));
   }
 
-  /** Contract: deferred conditional constructs fail with explicit unsupported diagnostics. */
+  /** Contract: staged varString/pad conditional fixtures generate deterministic C++ output. */
   @Test
-  void cppGeneratorFailsWithClearDiagnosticsForDeferredConditionalMembers() throws Exception {
-    CppCodeGenerator generator = new CppCodeGenerator();
-    ResolvedSchema schema = compileFixture("specs/milestone-03-valid.xml");
+  void cppGeneratorProducesDeterministicVarStringPadSliceOutput() throws Exception {
+    assertFixtureMatchesGolden(
+        "specs/varstring-pad-slice-valid.xml",
+        tempDir.resolve("conditional-staged"),
+        List.of(
+            "acme/telemetry/conditional/ConditionalFrame.hpp",
+            "acme/telemetry/conditional/ConditionalFrame.cpp"));
+  }
 
-    BmsException exception =
-        assertThrows(
-            BmsException.class, () -> generator.generate(schema, tempDir.resolve("deferred")));
+  /** Contract: checksum/if/nested conditional fixtures generate deterministic C++ output. */
+  @Test
+  void cppGeneratorProducesDeterministicConditionalBackendOutput() throws Exception {
+    assertFixtureMatchesGolden(
+        "specs/conditional-backend-valid.xml",
+        tempDir.resolve("conditional-backend"),
+        List.of(
+            "acme/telemetry/conditional/backend/ConditionalBackendFrame.hpp",
+            "acme/telemetry/conditional/backend/ConditionalBackendFrame.cpp"));
+  }
 
-    assertTrue(
-        exception.diagnostics().stream()
-            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_CPP_UNSUPPORTED_MEMBER")));
-    assertTrue(
-        exception.diagnostics().stream()
-            .anyMatch(
-                diagnostic -> diagnostic.code().equals("GENERATOR_CPP_UNSUPPORTED_TYPE_REF")));
+  /** Contract: relational/compound if-condition fixtures generate deterministic C++ output. */
+  @Test
+  void cppGeneratorProducesDeterministicConditionalRelationalOutput() throws Exception {
+    assertFixtureMatchesGolden(
+        "specs/conditional-if-relational-valid.xml",
+        tempDir.resolve("conditional-relational"),
+        List.of(
+            "acme/telemetry/conditional/relational/ConditionalRelationalFrame.hpp",
+            "acme/telemetry/conditional/relational/ConditionalRelationalFrame.cpp"));
   }
 
   /** Contract: manual `uint64` scaled-int models hit both encode and decode code paths. */
@@ -154,11 +168,7 @@ class CppCodeGeneratorTest {
     assertTrue(messages.stream().anyMatch(message -> message.contains("MissingVector")));
     assertTrue(messages.stream().anyMatch(message -> message.contains("MissingBlobArray")));
     assertTrue(messages.stream().anyMatch(message -> message.contains("MissingBlobVector")));
-    assertTrue(
-        messages.stream()
-            .anyMatch(
-                message ->
-                    message.contains("This type reference is not implemented in the C++ backend")));
+    assertTrue(messages.stream().anyMatch(message -> message.contains("LegacyVarString")));
     assertTrue(
         messages.stream().anyMatch(message -> message.contains("ResolvedArray(elementType=")));
     assertTrue(

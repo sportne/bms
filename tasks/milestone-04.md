@@ -8,29 +8,35 @@ This milestone closes the remaining C++ parity gap for conditional constructs.
 
 ## Work items
 
-- [ ] Implement C++ encode/decode emission for:
-  - [ ] `varString`
-  - [ ] `pad`
-  - [ ] `checksum`
-  - [ ] `if`
-  - [ ] nested `type`
-- [ ] Match Java checksum semantics for:
-  - [ ] `crc16`
-  - [ ] `crc32`
-  - [ ] `crc64`
-  - [ ] `sha256`
-- [ ] Match Java conditional semantics for:
-  - [ ] structured comparisons
-  - [ ] text `and`/`or` compound conditions
-  - [ ] rejection diagnostics for unsupported forms
-- [ ] Add C++ generator goldens for conditional fixtures.
-- [ ] Add generated-C++ compile tests for conditional fixtures.
-- [ ] Add generated-C++ runtime tests for:
-  - [ ] branch true/false paths
-  - [ ] checksum mismatch failures
+- [x] Implement C++ encode/decode emission for:
+  - [x] `varString`
+  - [x] `pad`
+  - [x] `checksum`
+  - [x] `if`
+  - [x] nested `type`
+- [x] Match Java checksum semantics for:
+  - [x] `crc16`
+  - [x] `crc32`
+  - [x] `crc64`
+  - [x] `sha256`
+- [x] Match Java conditional semantics for:
+  - [x] structured comparisons
+  - [x] text `and`/`or` compound conditions
+  - [x] rejection diagnostics for unsupported forms
+- [x] Add C++ generator goldens for conditional fixtures.
+- [x] Add generated-C++ compile tests for conditional fixtures.
+- [x] Add generated-C++ runtime tests for:
+  - [x] branch true/false paths
+  - [x] checksum mismatch failures
 
 ## Acceptance checks
 
-- [ ] `bms generate --cpp` succeeds for `varstring-pad-slice-valid.xml`.
-- [ ] `bms generate --cpp` succeeds for `conditional-backend-valid.xml`.
-- [ ] C++ runtime tests pass for conditional fixtures.
+- [x] `bms generate --cpp` succeeds for `varstring-pad-slice-valid.xml`.
+- [x] `bms generate --cpp` succeeds for `conditional-backend-valid.xml`.
+- [x] C++ runtime tests pass for conditional fixtures.
+
+## Evidence snapshot
+
+- `CppCodeGeneratorTest` contains deterministic golden checks for `varstring-pad`, `conditional-backend`, and relational conditional fixtures.
+- `CppGeneratedCompileTest` compiles generated C++ for conditional fixtures and checksum algorithm fixtures (`crc32`, `crc64`, `sha256`).
+- `CppGeneratedRuntimeE2ETest` verifies conditional roundtrips, true/false branch behavior, and checksum mismatch exceptions.

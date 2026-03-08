@@ -11,8 +11,8 @@ Use this checklist when preparing the `0.1.0` tag.
 
 ## Parity proof
 
-- [ ] C++ Milestone 03 acceptance checks complete.
-- [ ] C++ Milestone 04 acceptance checks complete.
+- [x] C++ Milestone 03 acceptance checks complete.
+- [x] C++ Milestone 04 acceptance checks complete.
 - [ ] Cross-language conformance tests are green.
 
 ## Documentation

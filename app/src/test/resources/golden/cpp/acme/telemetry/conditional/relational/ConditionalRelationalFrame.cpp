@@ -1,4 +1,4 @@
-#include "acme/telemetry/Header.hpp"
+#include "acme/telemetry/conditional/relational/ConditionalRelationalFrame.hpp"
 
 #include <array>
 #include <algorithm>
@@ -11,6 +11,8 @@
 
 namespace acme {
 namespace telemetry {
+namespace conditional {
+namespace relational {
 
 namespace {
 
@@ -382,29 +384,64 @@ std::array<std::uint8_t, 32> sha256(
 
 }  // namespace
 
-std::vector<std::uint8_t> Header::encode() const {
+std::vector<std::uint8_t> ConditionalRelationalFrame::encode() const {
   std::vector<std::uint8_t> out;
   writeIntegral<std::uint8_t>(out, this->version, false);
-  writeIntegral<std::uint16_t>(out, this->sequence, true);
-  (void)"sequence";
+  if ((static_cast<std::uint64_t>(this->version) < 10ULL)) {
+  writeIntegral<std::uint8_t>(out, this->ltMode, false);
+  }
+  if ((static_cast<std::uint64_t>(this->version) <= 10ULL)) {
+  writeIntegral<std::uint8_t>(out, this->lteMode, false);
+  }
+  if ((static_cast<std::uint64_t>(this->version) > 1ULL)) {
+  writeIntegral<std::uint8_t>(out, this->gtMode, false);
+  }
+  if ((static_cast<std::uint64_t>(this->version) >= 1ULL)) {
+  writeIntegral<std::uint8_t>(out, this->gteMode, false);
+  }
+  if (((static_cast<std::uint64_t>(this->version) >= 2ULL) && (static_cast<std::uint64_t>(this->version) <= 10ULL))) {
+  writeIntegral<std::uint8_t>(out, this->betweenMode, false);
+  }
+  if ((((static_cast<std::uint64_t>(this->version) == 2ULL) || (static_cast<std::uint64_t>(this->version) == 3ULL)) && (static_cast<std::uint64_t>(this->version) < 5ULL))) {
+  writeIntegral<std::uint8_t>(out, this->compoundMode, false);
+  }
   return out;
 }
 
-Header Header::decode(std::span<const std::uint8_t> data) {
+ConditionalRelationalFrame ConditionalRelationalFrame::decode(std::span<const std::uint8_t> data) {
   std::size_t cursor = 0;
-  Header value = Header::decodeFrom(data, cursor);
+  ConditionalRelationalFrame value = ConditionalRelationalFrame::decodeFrom(data, cursor);
   if (cursor != data.size()) {
-    throw std::invalid_argument("Extra bytes remain after decoding Header.");
+    throw std::invalid_argument("Extra bytes remain after decoding ConditionalRelationalFrame.");
   }
   return value;
 }
 
-Header Header::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
-  Header value{};
+ConditionalRelationalFrame ConditionalRelationalFrame::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
+  ConditionalRelationalFrame value{};
   value.version = readIntegral<std::uint8_t>(data, cursor, false, "version");
-  value.sequence = readIntegral<std::uint16_t>(data, cursor, true, "sequence");
+  if ((static_cast<std::uint64_t>(value.version) < 10ULL)) {
+  value.ltMode = readIntegral<std::uint8_t>(data, cursor, false, "ltMode");
+  }
+  if ((static_cast<std::uint64_t>(value.version) <= 10ULL)) {
+  value.lteMode = readIntegral<std::uint8_t>(data, cursor, false, "lteMode");
+  }
+  if ((static_cast<std::uint64_t>(value.version) > 1ULL)) {
+  value.gtMode = readIntegral<std::uint8_t>(data, cursor, false, "gtMode");
+  }
+  if ((static_cast<std::uint64_t>(value.version) >= 1ULL)) {
+  value.gteMode = readIntegral<std::uint8_t>(data, cursor, false, "gteMode");
+  }
+  if (((static_cast<std::uint64_t>(value.version) >= 2ULL) && (static_cast<std::uint64_t>(value.version) <= 10ULL))) {
+  value.betweenMode = readIntegral<std::uint8_t>(data, cursor, false, "betweenMode");
+  }
+  if ((((static_cast<std::uint64_t>(value.version) == 2ULL) || (static_cast<std::uint64_t>(value.version) == 3ULL)) && (static_cast<std::uint64_t>(value.version) < 5ULL))) {
+  value.compoundMode = readIntegral<std::uint8_t>(data, cursor, false, "compoundMode");
+  }
   return value;
 }
 
+}  // namespace relational
+}  // namespace conditional
 }  // namespace telemetry
 }  // namespace acme

@@ -1,4 +1,4 @@
-#include "acme/telemetry/Header.hpp"
+#include "acme/telemetry/conditional/backend/ConditionalBackendFrame.hpp"
 
 #include <array>
 #include <algorithm>
@@ -11,6 +11,8 @@
 
 namespace acme {
 namespace telemetry {
+namespace conditional {
+namespace backend {
 
 namespace {
 
@@ -382,29 +384,59 @@ std::array<std::uint8_t, 32> sha256(
 
 }  // namespace
 
-std::vector<std::uint8_t> Header::encode() const {
+std::vector<std::uint8_t> ConditionalBackendFrame::encode() const {
   std::vector<std::uint8_t> out;
   writeIntegral<std::uint8_t>(out, this->version, false);
-  writeIntegral<std::uint16_t>(out, this->sequence, true);
-  (void)"sequence";
+  writeIntegral<std::uint8_t>(out, this->payload, false);
+  {
+    validateChecksumRange(out.size(), 0, 1, "crc16", "0..1");
+    std::span<const std::uint8_t> checksumSource(out.data(), out.size());
+    writeIntegral<std::uint16_t>(out, crc16(checksumSource, 0, 1), false);
+  }
+  if ((static_cast<std::uint64_t>(this->version) == 1ULL)) {
+  writeIntegral<std::uint8_t>(out, this->modeValue, false);
+  writeIntegral<std::uint16_t>(out, this->nestedValue, false);
+  (void)"nestedValue";
+  }
+  writeIntegral<std::uint8_t>(out, this->alwaysValue, false);
   return out;
 }
 
-Header Header::decode(std::span<const std::uint8_t> data) {
+ConditionalBackendFrame ConditionalBackendFrame::decode(std::span<const std::uint8_t> data) {
   std::size_t cursor = 0;
-  Header value = Header::decodeFrom(data, cursor);
+  ConditionalBackendFrame value = ConditionalBackendFrame::decodeFrom(data, cursor);
   if (cursor != data.size()) {
-    throw std::invalid_argument("Extra bytes remain after decoding Header.");
+    throw std::invalid_argument("Extra bytes remain after decoding ConditionalBackendFrame.");
   }
   return value;
 }
 
-Header Header::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
-  Header value{};
+ConditionalBackendFrame ConditionalBackendFrame::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
+  ConditionalBackendFrame value{};
+  std::size_t messageStartCursor = cursor;
   value.version = readIntegral<std::uint8_t>(data, cursor, false, "version");
-  value.sequence = readIntegral<std::uint16_t>(data, cursor, true, "sequence");
+  value.payload = readIntegral<std::uint8_t>(data, cursor, false, "payload");
+  {
+    std::span<const std::uint8_t> messageBytes(
+        data.data() + messageStartCursor,
+        data.size() - messageStartCursor);
+    validateChecksumRange(messageBytes.size(), 0, 1, "crc16", "0..1");
+    std::uint16_t expectedChecksum = readIntegral<std::uint16_t>(
+        data, cursor, false, "crc16_checksum");
+    std::uint16_t actualChecksum = crc16(messageBytes, 0, 1);
+    if (expectedChecksum != actualChecksum) {
+      throw std::invalid_argument("Checksum mismatch for crc16 range 0..1.");
+    }
+  }
+  if ((static_cast<std::uint64_t>(value.version) == 1ULL)) {
+  value.modeValue = readIntegral<std::uint8_t>(data, cursor, false, "modeValue");
+  value.nestedValue = readIntegral<std::uint16_t>(data, cursor, false, "nestedValue");
+  }
+  value.alwaysValue = readIntegral<std::uint8_t>(data, cursor, false, "alwaysValue");
   return value;
 }
 
+}  // namespace backend
+}  // namespace conditional
 }  // namespace telemetry
 }  // namespace acme

@@ -1,4 +1,4 @@
-#include "acme/telemetry/Header.hpp"
+#include "acme/telemetry/conditional/ConditionalFrame.hpp"
 
 #include <array>
 #include <algorithm>
@@ -11,6 +11,7 @@
 
 namespace acme {
 namespace telemetry {
+namespace conditional {
 
 namespace {
 
@@ -382,29 +383,76 @@ std::array<std::uint8_t, 32> sha256(
 
 }  // namespace
 
-std::vector<std::uint8_t> Header::encode() const {
+std::vector<std::uint8_t> ConditionalFrame::encode() const {
   std::vector<std::uint8_t> out;
-  writeIntegral<std::uint8_t>(out, this->version, false);
-  writeIntegral<std::uint16_t>(out, this->sequence, true);
-  (void)"sequence";
+  writeIntegral<std::uint8_t>(out, this->nameLength, false);
+  writeIntegral<std::uint16_t>(out, this->reusableLength, false);
+  (void)"reusableLength";
+  {
+    std::string encodedInlineName = this->inlineName;
+    std::size_t expectedInlineNameLength = requireCount(this->nameLength, "nameLength");
+    if (encodedInlineName.size() != expectedInlineNameLength) {
+      throw std::invalid_argument("inlineName byte length must match count field nameLength.");
+    }
+    out.insert(out.end(), encodedInlineName.begin(), encodedInlineName.end());
+  }
+  {
+    std::string encodedInlineTag = this->inlineTag;
+    out.insert(out.end(), encodedInlineTag.begin(), encodedInlineTag.end());
+  writeIntegral<std::uint8_t>(out, static_cast<std::uint8_t>(0ULL), false);
+  }
+  {
+    std::string encodedReusableLabel = this->reusableLabel;
+    std::size_t expectedReusableLabelLength = requireCount(this->reusableLength, "reusableLength");
+    if (encodedReusableLabel.size() != expectedReusableLabelLength) {
+      throw std::invalid_argument("reusableLabel byte length must match count field reusableLength.");
+    }
+    out.insert(out.end(), encodedReusableLabel.begin(), encodedReusableLabel.end());
+  }
+  for (std::size_t padIndex = 0; padIndex < 2U; padIndex++) {
+    out.push_back(0U);
+  }
   return out;
 }
 
-Header Header::decode(std::span<const std::uint8_t> data) {
+ConditionalFrame ConditionalFrame::decode(std::span<const std::uint8_t> data) {
   std::size_t cursor = 0;
-  Header value = Header::decodeFrom(data, cursor);
+  ConditionalFrame value = ConditionalFrame::decodeFrom(data, cursor);
   if (cursor != data.size()) {
-    throw std::invalid_argument("Extra bytes remain after decoding Header.");
+    throw std::invalid_argument("Extra bytes remain after decoding ConditionalFrame.");
   }
   return value;
 }
 
-Header Header::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
-  Header value{};
-  value.version = readIntegral<std::uint8_t>(data, cursor, false, "version");
-  value.sequence = readIntegral<std::uint16_t>(data, cursor, true, "sequence");
+ConditionalFrame ConditionalFrame::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
+  ConditionalFrame value{};
+  value.nameLength = readIntegral<std::uint8_t>(data, cursor, false, "nameLength");
+  value.reusableLength = readIntegral<std::uint16_t>(data, cursor, false, "reusableLength");
+  std::size_t expectedInlineNameLength = requireCount(value.nameLength, "nameLength");
+  requireReadable(data, cursor, expectedInlineNameLength, "inlineName");
+  value.inlineName.assign(
+      reinterpret_cast<const char*>(data.data() + cursor),
+      expectedInlineNameLength);
+  cursor += expectedInlineNameLength;
+  value.inlineTag.clear();
+  while (true) {
+    std::uint8_t nextByte = readIntegral<std::uint8_t>(data, cursor, false, "inlineTag_item");
+    if (nextByte == static_cast<std::uint8_t>(0ULL)) {
+      break;
+    }
+    value.inlineTag.push_back(static_cast<char>(nextByte));
+  }
+  std::size_t expectedReusableLabelLength = requireCount(value.reusableLength, "reusableLength");
+  requireReadable(data, cursor, expectedReusableLabelLength, "reusableLabel");
+  value.reusableLabel.assign(
+      reinterpret_cast<const char*>(data.data() + cursor),
+      expectedReusableLabelLength);
+  cursor += expectedReusableLabelLength;
+  requireReadable(data, cursor, 2U, "pad");
+  cursor += 2U;
   return value;
 }
 
+}  // namespace conditional
 }  // namespace telemetry
 }  // namespace acme

@@ -4,6 +4,8 @@ import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.IfComparisonOperator;
+import io.github.sportne.bms.model.IfLogicalOperator;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
@@ -18,12 +20,18 @@ import io.github.sportne.bms.model.resolved.ResolvedBitSegment;
 import io.github.sportne.bms.model.resolved.ResolvedBitVariant;
 import io.github.sportne.bms.model.resolved.ResolvedBlobArray;
 import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
+import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
+import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
+import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfLogicalCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
+import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
@@ -31,6 +39,7 @@ import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedVarString;
 import io.github.sportne.bms.model.resolved.ResolvedVector;
 import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
 import io.github.sportne.bms.model.resolved.VarStringTypeRef;
@@ -55,8 +64,7 @@ import java.util.TreeSet;
 /**
  * Generates deterministic C++ source from the resolved model.
  *
- * <p>This milestone supports foundation, numeric, and collection members. Conditional and nested
- * members remain explicit unsupported diagnostics in C++ until milestone 04.
+ * <p>This milestone supports foundation, numeric, collection, and conditional members.
  */
 public final class CppCodeGenerator {
   private static final String SHARED_CPP_HELPERS =
@@ -254,6 +262,181 @@ public final class CppCodeGenerator {
         return static_cast<std::size_t>(count);
       }
 
+      void validateChecksumRange(
+          std::size_t availableLength,
+          int rangeStart,
+          int rangeEnd,
+          const char* algorithm,
+          const char* rangeText) {
+        if (rangeStart < 0
+            || rangeEnd < rangeStart
+            || static_cast<std::size_t>(rangeEnd) >= availableLength) {
+          throw std::invalid_argument(
+              std::string("Checksum ")
+              + algorithm
+              + " range "
+              + rangeText
+              + " is out of bounds for "
+              + std::to_string(availableLength)
+              + " available bytes.");
+        }
+      }
+
+      std::uint16_t crc16(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+        std::uint16_t crc = 0xFFFFU;
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc = static_cast<std::uint16_t>(crc ^ (static_cast<std::uint16_t>(source[index]) << 8U));
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000U) != 0U) {
+              crc = static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U);
+            } else {
+              crc = static_cast<std::uint16_t>(crc << 1U);
+            }
+          }
+        }
+        return crc;
+      }
+
+      std::uint32_t crc32(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+        std::uint32_t crc = 0xFFFFFFFFU;
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc ^= static_cast<std::uint32_t>(source[index]);
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 1U) != 0U) {
+              crc = (crc >> 1U) ^ 0xEDB88320U;
+            } else {
+              crc >>= 1U;
+            }
+          }
+        }
+        return crc ^ 0xFFFFFFFFU;
+      }
+
+      std::uint64_t crc64(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+        std::uint64_t crc = 0ULL;
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc ^= static_cast<std::uint64_t>(source[index]) << 56U;
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000000000000000ULL) != 0ULL) {
+              crc = (crc << 1U) ^ 0x42F0E1EBA9EA3693ULL;
+            } else {
+              crc <<= 1U;
+            }
+          }
+        }
+        return crc;
+      }
+
+      std::uint32_t rotateRight(std::uint32_t value, std::uint32_t bits) {
+        return (value >> bits) | (value << (32U - bits));
+      }
+
+      constexpr std::uint32_t kSha256RoundConstants[64] = {
+          0x428A2F98U, 0x71374491U, 0xB5C0FBCFU, 0xE9B5DBA5U, 0x3956C25BU, 0x59F111F1U,
+          0x923F82A4U, 0xAB1C5ED5U, 0xD807AA98U, 0x12835B01U, 0x243185BEU, 0x550C7DC3U,
+          0x72BE5D74U, 0x80DEB1FEU, 0x9BDC06A7U, 0xC19BF174U, 0xE49B69C1U, 0xEFBE4786U,
+          0x0FC19DC6U, 0x240CA1CCU, 0x2DE92C6FU, 0x4A7484AAU, 0x5CB0A9DCU, 0x76F988DAU,
+          0x983E5152U, 0xA831C66DU, 0xB00327C8U, 0xBF597FC7U, 0xC6E00BF3U, 0xD5A79147U,
+          0x06CA6351U, 0x14292967U, 0x27B70A85U, 0x2E1B2138U, 0x4D2C6DFCU, 0x53380D13U,
+          0x650A7354U, 0x766A0ABBU, 0x81C2C92EU, 0x92722C85U, 0xA2BFE8A1U, 0xA81A664BU,
+          0xC24B8B70U, 0xC76C51A3U, 0xD192E819U, 0xD6990624U, 0xF40E3585U, 0x106AA070U,
+          0x19A4C116U, 0x1E376C08U, 0x2748774CU, 0x34B0BCB5U, 0x391C0CB3U, 0x4ED8AA4AU,
+          0x5B9CCA4FU, 0x682E6FF3U, 0x748F82EEU, 0x78A5636FU, 0x84C87814U, 0x8CC70208U,
+          0x90BEFFFAU, 0xA4506CEBU, 0xBEF9A3F7U, 0xC67178F2U};
+
+      std::array<std::uint8_t, 32> sha256(
+          std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+        std::vector<std::uint8_t> message;
+        message.reserve(static_cast<std::size_t>(rangeEnd - rangeStart + 1) + 72U);
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          message.push_back(source[index]);
+        }
+
+        std::uint64_t bitLength = static_cast<std::uint64_t>(message.size()) * 8ULL;
+        message.push_back(0x80U);
+        while ((message.size() % 64U) != 56U) {
+          message.push_back(0U);
+        }
+        for (int shift = 56; shift >= 0; shift -= 8) {
+          message.push_back(static_cast<std::uint8_t>((bitLength >> shift) & 0xFFULL));
+        }
+
+        std::uint32_t h0 = 0x6A09E667U;
+        std::uint32_t h1 = 0xBB67AE85U;
+        std::uint32_t h2 = 0x3C6EF372U;
+        std::uint32_t h3 = 0xA54FF53AU;
+        std::uint32_t h4 = 0x510E527FU;
+        std::uint32_t h5 = 0x9B05688CU;
+        std::uint32_t h6 = 0x1F83D9ABU;
+        std::uint32_t h7 = 0x5BE0CD19U;
+
+        for (std::size_t chunkStart = 0; chunkStart < message.size(); chunkStart += 64U) {
+          std::uint32_t words[64] = {};
+          for (std::size_t index = 0; index < 16U; index++) {
+            std::size_t byteIndex = chunkStart + (index * 4U);
+            words[index] = (static_cast<std::uint32_t>(message[byteIndex]) << 24U)
+                | (static_cast<std::uint32_t>(message[byteIndex + 1U]) << 16U)
+                | (static_cast<std::uint32_t>(message[byteIndex + 2U]) << 8U)
+                | static_cast<std::uint32_t>(message[byteIndex + 3U]);
+          }
+          for (std::size_t index = 16U; index < 64U; index++) {
+            std::uint32_t s0 = rotateRight(words[index - 15U], 7U)
+                ^ rotateRight(words[index - 15U], 18U)
+                ^ (words[index - 15U] >> 3U);
+            std::uint32_t s1 = rotateRight(words[index - 2U], 17U)
+                ^ rotateRight(words[index - 2U], 19U)
+                ^ (words[index - 2U] >> 10U);
+            words[index] = words[index - 16U] + s0 + words[index - 7U] + s1;
+          }
+
+          std::uint32_t a = h0;
+          std::uint32_t b = h1;
+          std::uint32_t c = h2;
+          std::uint32_t d = h3;
+          std::uint32_t e = h4;
+          std::uint32_t f = h5;
+          std::uint32_t g = h6;
+          std::uint32_t h = h7;
+
+          for (std::size_t index = 0; index < 64U; index++) {
+            std::uint32_t s1 = rotateRight(e, 6U) ^ rotateRight(e, 11U) ^ rotateRight(e, 25U);
+            std::uint32_t ch = (e & f) ^ ((~e) & g);
+            std::uint32_t temp1 = h + s1 + ch + kSha256RoundConstants[index] + words[index];
+            std::uint32_t s0 = rotateRight(a, 2U) ^ rotateRight(a, 13U) ^ rotateRight(a, 22U);
+            std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            std::uint32_t temp2 = s0 + maj;
+
+            h = g;
+            g = f;
+            f = e;
+            e = d + temp1;
+            d = c;
+            c = b;
+            b = a;
+            a = temp1 + temp2;
+          }
+
+          h0 += a;
+          h1 += b;
+          h2 += c;
+          h3 += d;
+          h4 += e;
+          h5 += f;
+          h6 += g;
+          h7 += h;
+        }
+
+        std::array<std::uint8_t, 32> digest = {};
+        std::uint32_t hashWords[8] = {h0, h1, h2, h3, h4, h5, h6, h7};
+        for (std::size_t index = 0; index < 8U; index++) {
+          digest[index * 4U] = static_cast<std::uint8_t>((hashWords[index] >> 24U) & 0xFFU);
+          digest[index * 4U + 1U] = static_cast<std::uint8_t>((hashWords[index] >> 16U) & 0xFFU);
+          digest[index * 4U + 2U] = static_cast<std::uint8_t>((hashWords[index] >> 8U) & 0xFFU);
+          digest[index * 4U + 3U] = static_cast<std::uint8_t>(hashWords[index] & 0xFFU);
+        }
+        return digest;
+      }
+
       }  // namespace
       """;
 
@@ -309,7 +492,8 @@ public final class CppCodeGenerator {
         mapArrays(schema.reusableArrays()),
         mapVectors(schema.reusableVectors()),
         mapBlobArrays(schema.reusableBlobArrays()),
-        mapBlobVectors(schema.reusableBlobVectors()));
+        mapBlobVectors(schema.reusableBlobVectors()),
+        mapVarStrings(schema.reusableVarStrings()));
   }
 
   /**
@@ -334,6 +518,13 @@ public final class CppCodeGenerator {
           sourcePath.toString(),
           diagnostics);
     }
+    checkFlattenedMemberNames(
+        messageType.name(),
+        messageType.members(),
+        new TreeSet<>(),
+        sourcePath.toString(),
+        diagnostics,
+        "message");
 
     if (!diagnostics.isEmpty()) {
       throw new BmsException("C++ code generation failed due to unsupported members.", diagnostics);
@@ -348,13 +539,32 @@ public final class CppCodeGenerator {
    */
   private static Map<String, PrimitiveType> primitiveFieldsByName(ResolvedMessageType messageType) {
     Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
-    for (ResolvedMessageMember member : messageType.members()) {
+    collectPrimitiveFields(primitiveFieldByName, messageType.members());
+    return Map.copyOf(primitiveFieldByName);
+  }
+
+  /**
+   * Collects primitive scalar field types from one member list recursively.
+   *
+   * @param primitiveFieldByName destination primitive-field lookup map
+   * @param members members to inspect
+   */
+  private static void collectPrimitiveFields(
+      Map<String, PrimitiveType> primitiveFieldByName, List<ResolvedMessageMember> members) {
+    for (ResolvedMessageMember member : members) {
       if (member instanceof ResolvedField resolvedField
           && resolvedField.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
         primitiveFieldByName.putIfAbsent(resolvedField.name(), primitiveTypeRef.primitiveType());
+        continue;
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        collectPrimitiveFields(primitiveFieldByName, resolvedIfBlock.members());
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        collectPrimitiveFields(primitiveFieldByName, resolvedNestedType.members());
       }
     }
-    return Map.copyOf(primitiveFieldByName);
   }
 
   /**
@@ -414,6 +624,38 @@ public final class CppCodeGenerator {
     if (member instanceof ResolvedBlobVector resolvedBlobVector) {
       checkBlobVectorSupport(
           resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      checkVarStringSupport(
+          resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedPad) {
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      checkChecksumSupport(resolvedChecksum, messageType, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      checkIfBlockSupport(
+          resolvedIfBlock,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      checkNestedTypeSupport(
+          resolvedNestedType,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
       return;
     }
 
@@ -539,6 +781,23 @@ public final class CppCodeGenerator {
       } else {
         checkBlobVectorSupport(
             resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+      }
+      return;
+    }
+    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
+      ResolvedVarString resolvedVarString =
+          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+      if (resolvedVarString == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath,
+                "Reusable varString was not found: " + varStringTypeRef.varStringTypeName()));
+      } else {
+        checkVarStringSupport(
+            resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
       }
       return;
     }
@@ -673,6 +932,263 @@ public final class CppCodeGenerator {
         outputPath,
         diagnostics,
         "blobVector " + resolvedBlobVector.name());
+  }
+
+  /**
+   * Checks support for one checksum definition.
+   *
+   * @param resolvedChecksum checksum definition to validate
+   * @param messageType parent message type
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkChecksumSupport(
+      ResolvedChecksum resolvedChecksum,
+      ResolvedMessageType messageType,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!isSupportedChecksumAlgorithm(resolvedChecksum.algorithm())) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "checksum " + resolvedChecksum.algorithm() + "(unsupported algorithm)",
+              outputPath));
+      return;
+    }
+    if (parseChecksumRange(resolvedChecksum.range()) == null) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "checksum " + resolvedChecksum.algorithm() + "(invalid range)",
+              outputPath));
+    }
+  }
+
+  /**
+   * Checks support for one conditional block and all nested members.
+   *
+   * @param resolvedIfBlock resolved conditional block
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkIfBlockSupport(
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    for (ResolvedMessageMember nestedMember : resolvedIfBlock.members()) {
+      checkMemberSupport(
+          nestedMember,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+    }
+  }
+
+  /**
+   * Checks support for one nested message block and all nested members.
+   *
+   * @param resolvedNestedType resolved nested message block
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkNestedTypeSupport(
+      ResolvedMessageType resolvedNestedType,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    for (ResolvedMessageMember nestedMember : resolvedNestedType.members()) {
+      checkMemberSupport(
+          nestedMember,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+    }
+  }
+
+  /**
+   * Rejects flattened member-name collisions that would produce duplicate C++ fields.
+   *
+   * @param ownerName parent message name used in diagnostics
+   * @param members members to inspect in declaration order
+   * @param flattenedMemberNames destination set of flattened declaration names
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @param ownerContext short owner label used in diagnostics
+   */
+  private static void checkFlattenedMemberNames(
+      String ownerName,
+      List<ResolvedMessageMember> members,
+      Set<String> flattenedMemberNames,
+      String outputPath,
+      List<Diagnostic> diagnostics,
+      String ownerContext) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        checkFlattenedMemberNames(
+            ownerName,
+            resolvedIfBlock.members(),
+            flattenedMemberNames,
+            outputPath,
+            diagnostics,
+            "if block");
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        checkFlattenedMemberNames(
+            ownerName,
+            resolvedNestedType.members(),
+            flattenedMemberNames,
+            outputPath,
+            diagnostics,
+            "nested type " + resolvedNestedType.name());
+        continue;
+      }
+      if (!isDeclarableMember(member)) {
+        continue;
+      }
+      String flattenedName = memberName(member);
+      if (!flattenedMemberNames.add(flattenedName)) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                ownerName,
+                ownerContext + " member name collision for " + flattenedName,
+                outputPath));
+      }
+    }
+  }
+
+  /**
+   * Returns whether one member kind produces a generated C++ field declaration.
+   *
+   * @param member member to inspect
+   * @return {@code true} when the member is emitted as a C++ field
+   */
+  private static boolean isDeclarableMember(ResolvedMessageMember member) {
+    return member instanceof ResolvedField
+        || member instanceof ResolvedBitField
+        || member instanceof ResolvedFloat
+        || member instanceof ResolvedScaledInt
+        || member instanceof ResolvedArray
+        || member instanceof ResolvedVector
+        || member instanceof ResolvedBlobArray
+        || member instanceof ResolvedBlobVector
+        || member instanceof ResolvedVarString;
+  }
+
+  /**
+   * Checks support for one varString definition.
+   *
+   * @param resolvedVarString varString definition to validate
+   * @param messageType parent message type
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkVarStringSupport(
+      ResolvedVarString resolvedVarString,
+      ResolvedMessageType messageType,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      if (!primitiveFieldByName.containsKey(resolvedCountFieldLength.ref())) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                "varString "
+                    + resolvedVarString.name()
+                    + "(countField ref=\""
+                    + resolvedCountFieldLength.ref()
+                    + "\")",
+                outputPath));
+      }
+      return;
+    }
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
+      validateVarStringTerminatorLiteral(
+          resolvedVarString,
+          resolvedTerminatorValueLength.value(),
+          messageType,
+          outputPath,
+          diagnostics);
+      return;
+    }
+    diagnostics.add(
+        unsupportedMemberDiagnostic(
+            messageType.name(),
+            "varString " + resolvedVarString.name() + "(terminatorField path)",
+            outputPath));
+  }
+
+  /**
+   * Checks that one varString terminator literal is valid.
+   *
+   * @param resolvedVarString varString definition to validate
+   * @param literal terminator literal text
+   * @param messageType parent message type
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void validateVarStringTerminatorLiteral(
+      ResolvedVarString resolvedVarString,
+      String literal,
+      ResolvedMessageType messageType,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    try {
+      BigInteger value = parseNumericLiteral(literal);
+      if (!fitsPrimitiveRange(value, PrimitiveType.UINT8)) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                "varString "
+                    + resolvedVarString.name()
+                    + "(terminator literal out of range: "
+                    + literal
+                    + ")",
+                outputPath));
+      }
+    } catch (NumberFormatException exception) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "varString "
+                  + resolvedVarString.name()
+                  + "(invalid terminator literal: "
+                  + literal
+                  + ")",
+              outputPath));
+    }
+  }
+
+  /**
+   * Returns whether one checksum algorithm is supported by this C++ backend.
+   *
+   * @param algorithm checksum algorithm literal
+   * @return {@code true} when supported
+   */
+  private static boolean isSupportedChecksumAlgorithm(String algorithm) {
+    return "crc16".equals(algorithm)
+        || "crc32".equals(algorithm)
+        || "crc64".equals(algorithm)
+        || "sha256".equals(algorithm);
   }
 
   /**
@@ -886,6 +1402,21 @@ public final class CppCodeGenerator {
   }
 
   /**
+   * Builds a stable lookup map from varString type name to definition.
+   *
+   * @param reusableVarStrings reusable varString definitions from schema scope
+   * @return immutable varString lookup map
+   */
+  private static Map<String, ResolvedVarString> mapVarStrings(
+      List<ResolvedVarString> reusableVarStrings) {
+    Map<String, ResolvedVarString> reusableVarStringByName = new LinkedHashMap<>();
+    for (ResolvedVarString resolvedVarString : reusableVarStrings) {
+      reusableVarStringByName.put(resolvedVarString.name(), resolvedVarString);
+    }
+    return Map.copyOf(reusableVarStringByName);
+  }
+
+  /**
    * Renders one C++ header file for a resolved message.
    *
    * @param messageType message type to render
@@ -900,6 +1431,7 @@ public final class CppCodeGenerator {
     builder.append("#include <cstddef>\n");
     builder.append("#include <cstdint>\n");
     builder.append("#include <span>\n");
+    builder.append("#include <string>\n");
     builder.append("#include <vector>\n");
 
     TreeSet<String> includePaths = new TreeSet<>();
@@ -976,6 +1508,20 @@ public final class CppCodeGenerator {
     if (member instanceof ResolvedVector resolvedVector) {
       collectMessageIncludesForTypeRef(
           resolvedVector.elementTypeRef(), currentNamespace, generationContext, includePaths);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      for (ResolvedMessageMember nestedMember : resolvedIfBlock.members()) {
+        collectMessageIncludesForMember(
+            nestedMember, currentNamespace, generationContext, includePaths);
+      }
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      for (ResolvedMessageMember nestedMember : resolvedNestedType.members()) {
+        collectMessageIncludesForMember(
+            nestedMember, currentNamespace, generationContext, includePaths);
+      }
     }
   }
 
@@ -1028,8 +1574,35 @@ public final class CppCodeGenerator {
    */
   private static void appendMemberDeclarations(
       StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
-    for (ResolvedMessageMember member : messageType.members()) {
-      String cppType = memberCppType(member, messageType.effectiveNamespace(), generationContext);
+    appendMemberDeclarationsRecursive(
+        builder, messageType.members(), messageType.effectiveNamespace(), generationContext);
+  }
+
+  /**
+   * Appends field declarations for one member list, flattening nested/conditional blocks.
+   *
+   * @param builder destination header builder
+   * @param members members to inspect in declaration order
+   * @param currentNamespace namespace of the generated message
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendMemberDeclarationsRecursive(
+      StringBuilder builder,
+      List<ResolvedMessageMember> members,
+      String currentNamespace,
+      GenerationContext generationContext) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        appendMemberDeclarationsRecursive(
+            builder, resolvedIfBlock.members(), currentNamespace, generationContext);
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        appendMemberDeclarationsRecursive(
+            builder, resolvedNestedType.members(), currentNamespace, generationContext);
+        continue;
+      }
+      String cppType = memberCppType(member, currentNamespace, generationContext);
       if (cppType == null) {
         continue;
       }
@@ -1082,6 +1655,9 @@ public final class CppCodeGenerator {
     }
     if (member instanceof ResolvedBlobVector) {
       return "std::vector<std::uint8_t>";
+    }
+    if (member instanceof ResolvedVarString) {
+      return "std::string";
     }
     return null;
   }
@@ -1146,8 +1722,7 @@ public final class CppCodeGenerator {
       return "std::vector<std::uint8_t>";
     }
     if (typeRef instanceof VarStringTypeRef) {
-      throw new IllegalStateException(
-          "VarString type references are unsupported in C++ milestone 03.");
+      return "std::string";
     }
     throw new IllegalStateException(
         "Unsupported type reference: " + typeRef.getClass().getSimpleName());
@@ -1272,6 +1847,7 @@ public final class CppCodeGenerator {
       ResolvedMessageType messageType, GenerationContext generationContext) {
     StringBuilder builder = new StringBuilder();
     builder.append("#include \"").append(headerIncludePath(messageType)).append("\"\n\n");
+    builder.append("#include <array>\n");
     builder.append("#include <algorithm>\n");
     builder.append("#include <cmath>\n");
     builder.append("#include <cstring>\n");
@@ -1537,6 +2113,45 @@ public final class CppCodeGenerator {
           primitiveFieldByName,
           ownerPrefix,
           resolvedBlobVector.name());
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      appendEncodeVarString(
+          builder,
+          "this->" + resolvedVarString.name(),
+          resolvedVarString,
+          primitiveFieldByName,
+          ownerPrefix,
+          resolvedVarString.name());
+      return;
+    }
+    if (member instanceof ResolvedPad resolvedPad) {
+      appendEncodePad(builder, resolvedPad);
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      appendEncodeChecksum(builder, resolvedChecksum);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      appendEncodeIfBlock(
+          builder,
+          resolvedIfBlock,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          ownerPrefix);
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      appendEncodeMembers(
+          builder,
+          resolvedNestedType.members(),
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          ownerPrefix);
+      return;
     }
   }
 
@@ -1628,6 +2243,18 @@ public final class CppCodeGenerator {
           builder,
           valueExpression,
           resolvedBlobVector,
+          primitiveFieldByName,
+          ownerPrefix,
+          fieldName);
+      return;
+    }
+    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
+      ResolvedVarString resolvedVarString =
+          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+      appendEncodeVarString(
+          builder,
+          valueExpression,
+          resolvedVarString,
           primitiveFieldByName,
           ownerPrefix,
           fieldName);
@@ -2131,6 +2758,205 @@ public final class CppCodeGenerator {
   }
 
   /**
+   * Appends varString encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the string value
+   * @param resolvedVarString varString definition
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner prefix used for count-field references
+   * @param fieldName field/member name used in helper labels
+   */
+  private static void appendEncodeVarString(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedVarString resolvedVarString,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      String fieldName) {
+    String encodedLocalName = "encoded" + toPascalCase(fieldName);
+    builder
+        .append("  {\n")
+        .append("    std::string ")
+        .append(encodedLocalName)
+        .append(" = ")
+        .append(valueExpression)
+        .append(";\n");
+    appendVarStringCountValidation(
+        builder,
+        resolvedVarString.lengthMode(),
+        encodedLocalName,
+        primitiveFieldByName,
+        ownerPrefix,
+        fieldName);
+    builder
+        .append("    out.insert(out.end(), ")
+        .append(encodedLocalName)
+        .append(".begin(), ")
+        .append(encodedLocalName)
+        .append(".end());\n");
+    String terminatorLiteral = terminatorLiteral(resolvedVarString.lengthMode());
+    if (terminatorLiteral != null) {
+      appendEncodePrimitive(
+          builder,
+          primitiveLiteralExpression(PrimitiveType.UINT8, parseNumericLiteral(terminatorLiteral)),
+          PrimitiveType.UINT8,
+          Endian.BIG,
+          fieldName + "_terminator");
+    }
+    builder.append("  }\n");
+  }
+
+  /**
+   * Appends count-field validation for varString encode paths.
+   *
+   * @param builder destination source builder
+   * @param lengthMode varString length mode
+   * @param encodedBytesExpression expression that resolves to the encoded byte string
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner prefix used for count-field references
+   * @param fieldName field/member name used in helper labels
+   */
+  private static void appendVarStringCountValidation(
+      StringBuilder builder,
+      ResolvedLengthMode lengthMode,
+      String encodedBytesExpression,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      String fieldName) {
+    if (!(lengthMode instanceof ResolvedCountFieldLength resolvedCountFieldLength)) {
+      return;
+    }
+    PrimitiveType countType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+    if (countType == null) {
+      return;
+    }
+    builder
+        .append("    std::size_t expected")
+        .append(toPascalCase(fieldName))
+        .append("Length = requireCount(")
+        .append(ownerPrefix)
+        .append(resolvedCountFieldLength.ref())
+        .append(", \"")
+        .append(resolvedCountFieldLength.ref())
+        .append("\");\n")
+        .append("    if (")
+        .append(encodedBytesExpression)
+        .append(".size() != expected")
+        .append(toPascalCase(fieldName))
+        .append("Length) {\n")
+        .append("      throw std::invalid_argument(\"")
+        .append(fieldName)
+        .append(" byte length must match count field ")
+        .append(resolvedCountFieldLength.ref())
+        .append(".\");\n")
+        .append("    }\n");
+  }
+
+  /**
+   * Appends pad encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedPad pad definition
+   */
+  private static void appendEncodePad(StringBuilder builder, ResolvedPad resolvedPad) {
+    builder
+        .append("  for (std::size_t padIndex = 0; padIndex < ")
+        .append(resolvedPad.bytes())
+        .append("U; padIndex++) {\n")
+        .append("    out.push_back(0U);\n")
+        .append("  }\n");
+  }
+
+  /**
+   * Appends checksum encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedChecksum checksum definition
+   */
+  private static void appendEncodeChecksum(
+      StringBuilder builder, ResolvedChecksum resolvedChecksum) {
+    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    String algorithm = resolvedChecksum.algorithm();
+    builder
+        .append("  {\n")
+        .append("    validateChecksumRange(out.size(), ")
+        .append(checksumRange.startInclusive())
+        .append(", ")
+        .append(checksumRange.endInclusive())
+        .append(", \"")
+        .append(algorithm)
+        .append("\", \"")
+        .append(resolvedChecksum.range())
+        .append("\");\n")
+        .append("    std::span<const std::uint8_t> checksumSource(out.data(), out.size());\n");
+    if ("crc16".equals(algorithm)) {
+      builder
+          .append("    writeIntegral<std::uint16_t>(out, crc16(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append("), false);\n");
+    } else if ("crc32".equals(algorithm)) {
+      builder
+          .append("    writeIntegral<std::uint32_t>(out, crc32(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append("), false);\n");
+    } else if ("crc64".equals(algorithm)) {
+      builder
+          .append("    writeIntegral<std::uint64_t>(out, crc64(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append("), false);\n");
+    } else if ("sha256".equals(algorithm)) {
+      builder
+          .append("    std::array<std::uint8_t, 32> checksumValue = sha256(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("    out.insert(out.end(), checksumValue.begin(), checksumValue.end());\n");
+    } else {
+      throw new IllegalStateException("Unsupported checksum algorithm: " + algorithm);
+    }
+    builder.append("  }\n");
+  }
+
+  /**
+   * Appends conditional-block encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedIfBlock conditional block definition
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner prefix used for field access
+   */
+  private static void appendEncodeIfBlock(
+      StringBuilder builder,
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    builder
+        .append("  if (")
+        .append(ifConditionExpression(resolvedIfBlock.condition(), ownerPrefix))
+        .append(") {\n");
+    appendEncodeMembers(
+        builder,
+        resolvedIfBlock.members(),
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        ownerPrefix);
+    builder.append("  }\n");
+  }
+
+  /**
    * Appends the public `decode(span)` method.
    *
    * @param builder destination source builder
@@ -2175,6 +3001,9 @@ public final class CppCodeGenerator {
         .append("  ")
         .append(messageType.name())
         .append(" value{};\n");
+    if (containsChecksumMember(messageType.members())) {
+      builder.append("  std::size_t messageStartCursor = cursor;\n");
+    }
     appendDecodeMembers(
         builder,
         messageType.members(),
@@ -2296,6 +3125,45 @@ public final class CppCodeGenerator {
           primitiveFieldByName,
           ownerPrefix,
           resolvedBlobVector.name());
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      appendDecodeVarString(
+          builder,
+          ownerPrefix + resolvedVarString.name(),
+          resolvedVarString,
+          primitiveFieldByName,
+          ownerPrefix,
+          resolvedVarString.name());
+      return;
+    }
+    if (member instanceof ResolvedPad resolvedPad) {
+      appendDecodePad(builder, resolvedPad);
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      appendDecodeChecksum(builder, resolvedChecksum);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      appendDecodeIfBlock(
+          builder,
+          resolvedIfBlock,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          ownerPrefix);
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      appendDecodeMembers(
+          builder,
+          resolvedNestedType.members(),
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          ownerPrefix);
+      return;
     }
   }
 
@@ -2388,6 +3256,16 @@ public final class CppCodeGenerator {
           builder,
           targetExpression,
           generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName()),
+          primitiveFieldByName,
+          ownerPrefix,
+          fieldName);
+      return;
+    }
+    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
+      appendDecodeVarString(
+          builder,
+          targetExpression,
+          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName()),
           primitiveFieldByName,
           ownerPrefix,
           fieldName);
@@ -2999,6 +3877,249 @@ public final class CppCodeGenerator {
   }
 
   /**
+   * Appends varString decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedVarString varString definition
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner prefix used for count-field references
+   * @param fieldName field/member name used in helper labels
+   */
+  private static void appendDecodeVarString(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedVarString resolvedVarString,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      String fieldName) {
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      PrimitiveType countType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+      if (countType == null) {
+        return;
+      }
+      builder
+          .append("  std::size_t expected")
+          .append(toPascalCase(fieldName))
+          .append("Length = requireCount(")
+          .append(ownerPrefix)
+          .append(resolvedCountFieldLength.ref())
+          .append(", \"")
+          .append(resolvedCountFieldLength.ref())
+          .append("\");\n")
+          .append("  requireReadable(data, cursor, expected")
+          .append(toPascalCase(fieldName))
+          .append("Length, \"")
+          .append(fieldName)
+          .append("\");\n")
+          .append("  ")
+          .append(targetExpression)
+          .append(".assign(\n")
+          .append("      reinterpret_cast<const char*>(data.data() + cursor),\n")
+          .append("      expected")
+          .append(toPascalCase(fieldName))
+          .append("Length);\n")
+          .append("  cursor += expected")
+          .append(toPascalCase(fieldName))
+          .append("Length;\n");
+      return;
+    }
+    BigInteger numericLiteral =
+        parseNumericLiteral(terminatorLiteral(resolvedVarString.lengthMode()));
+    builder
+        .append("  ")
+        .append(targetExpression)
+        .append(".clear();\n")
+        .append("  while (true) {\n")
+        .append("    std::uint8_t nextByte = readIntegral<std::uint8_t>(data, cursor, false, \"")
+        .append(fieldName)
+        .append("_item\");\n")
+        .append("    if (nextByte == ")
+        .append(primitiveLiteralExpression(PrimitiveType.UINT8, numericLiteral))
+        .append(") {\n")
+        .append("      break;\n")
+        .append("    }\n")
+        .append("    ")
+        .append(targetExpression)
+        .append(".push_back(static_cast<char>(nextByte));\n")
+        .append("  }\n");
+  }
+
+  /**
+   * Appends pad decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedPad pad definition
+   */
+  private static void appendDecodePad(StringBuilder builder, ResolvedPad resolvedPad) {
+    builder
+        .append("  requireReadable(data, cursor, ")
+        .append(resolvedPad.bytes())
+        .append("U, \"pad\");\n")
+        .append("  cursor += ")
+        .append(resolvedPad.bytes())
+        .append("U;\n");
+  }
+
+  /**
+   * Appends checksum decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedChecksum checksum definition
+   */
+  private static void appendDecodeChecksum(
+      StringBuilder builder, ResolvedChecksum resolvedChecksum) {
+    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    String algorithm = resolvedChecksum.algorithm();
+    builder
+        .append("  {\n")
+        .append("    std::span<const std::uint8_t> messageBytes(\n")
+        .append("        data.data() + messageStartCursor,\n")
+        .append("        data.size() - messageStartCursor);\n")
+        .append("    validateChecksumRange(messageBytes.size(), ")
+        .append(checksumRange.startInclusive())
+        .append(", ")
+        .append(checksumRange.endInclusive())
+        .append(", \"")
+        .append(algorithm)
+        .append("\", \"")
+        .append(resolvedChecksum.range())
+        .append("\");\n");
+    if ("crc16".equals(algorithm)) {
+      builder
+          .append("    std::uint16_t expectedChecksum = readIntegral<std::uint16_t>(\n")
+          .append("        data, cursor, false, \"")
+          .append(algorithm)
+          .append("_checksum\");\n")
+          .append("    std::uint16_t actualChecksum = crc16(messageBytes, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("    if (expectedChecksum != actualChecksum) {\n")
+          .append("      throw std::invalid_argument(\"Checksum mismatch for ")
+          .append(algorithm)
+          .append(" range ")
+          .append(resolvedChecksum.range())
+          .append(".\");\n")
+          .append("    }\n");
+    } else if ("crc32".equals(algorithm)) {
+      builder
+          .append("    std::uint32_t expectedChecksum = readIntegral<std::uint32_t>(\n")
+          .append("        data, cursor, false, \"")
+          .append(algorithm)
+          .append("_checksum\");\n")
+          .append("    std::uint32_t actualChecksum = crc32(messageBytes, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("    if (expectedChecksum != actualChecksum) {\n")
+          .append("      throw std::invalid_argument(\"Checksum mismatch for ")
+          .append(algorithm)
+          .append(" range ")
+          .append(resolvedChecksum.range())
+          .append(".\");\n")
+          .append("    }\n");
+    } else if ("crc64".equals(algorithm)) {
+      builder
+          .append("    std::uint64_t expectedChecksum = readIntegral<std::uint64_t>(\n")
+          .append("        data, cursor, false, \"")
+          .append(algorithm)
+          .append("_checksum\");\n")
+          .append("    std::uint64_t actualChecksum = crc64(messageBytes, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("    if (expectedChecksum != actualChecksum) {\n")
+          .append("      throw std::invalid_argument(\"Checksum mismatch for ")
+          .append(algorithm)
+          .append(" range ")
+          .append(resolvedChecksum.range())
+          .append(".\");\n")
+          .append("    }\n");
+    } else if ("sha256".equals(algorithm)) {
+      builder
+          .append("    requireReadable(data, cursor, 32U, \"sha256_checksum\");\n")
+          .append("    std::array<std::uint8_t, 32> expectedChecksum{};\n")
+          .append("    std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(cursor), 32, ")
+          .append("expectedChecksum.begin());\n")
+          .append("    cursor += 32U;\n")
+          .append("    std::array<std::uint8_t, 32> actualChecksum = sha256(messageBytes, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("    if (expectedChecksum != actualChecksum) {\n")
+          .append("      throw std::invalid_argument(\"Checksum mismatch for ")
+          .append(algorithm)
+          .append(" range ")
+          .append(resolvedChecksum.range())
+          .append(".\");\n")
+          .append("    }\n");
+    } else {
+      throw new IllegalStateException("Unsupported checksum algorithm: " + algorithm);
+    }
+    builder.append("  }\n");
+  }
+
+  /**
+   * Appends conditional-block decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedIfBlock conditional block definition
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner prefix used for field access
+   */
+  private static void appendDecodeIfBlock(
+      StringBuilder builder,
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    builder
+        .append("  if (")
+        .append(ifConditionExpression(resolvedIfBlock.condition(), ownerPrefix))
+        .append(") {\n");
+    appendDecodeMembers(
+        builder,
+        resolvedIfBlock.members(),
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        ownerPrefix);
+    builder.append("  }\n");
+  }
+
+  /**
+   * Returns whether one member list contains a checksum member recursively.
+   *
+   * @param members members to inspect
+   * @return {@code true} when any member is a checksum
+   */
+  private static boolean containsChecksumMember(List<ResolvedMessageMember> members) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedChecksum) {
+        return true;
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock
+          && containsChecksumMember(resolvedIfBlock.members())) {
+        return true;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType
+          && containsChecksumMember(resolvedNestedType.members())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Returns the exact declaration name for one member.
    *
    * @param member member whose name is needed
@@ -3028,6 +4149,9 @@ public final class CppCodeGenerator {
     }
     if (member instanceof ResolvedBlobVector resolvedBlobVector) {
       return resolvedBlobVector.name();
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      return resolvedVarString.name();
     }
     throw new IllegalStateException("Unsupported member has no declaration name: " + member);
   }
@@ -3107,6 +4231,143 @@ public final class CppCodeGenerator {
       return new BigInteger(trimmed, 10);
     }
     return new BigInteger(trimmed, 16);
+  }
+
+  /**
+   * Parses one checksum range string in the form {@code start..end}.
+   *
+   * @param rangeText checksum range text
+   * @return parsed checksum range, or {@code null} when invalid
+   */
+  private static ChecksumRange parseChecksumRange(String rangeText) {
+    int separator = rangeText.indexOf("..");
+    if (separator < 0 || separator != rangeText.lastIndexOf("..")) {
+      return null;
+    }
+    String startText = rangeText.substring(0, separator).trim();
+    String endText = rangeText.substring(separator + 2).trim();
+    if (startText.isEmpty() || endText.isEmpty()) {
+      return null;
+    }
+    try {
+      BigInteger start = parseNumericLiteral(startText);
+      BigInteger end = parseNumericLiteral(endText);
+      if (start.signum() < 0 || end.signum() < 0 || start.compareTo(end) > 0) {
+        return null;
+      }
+      if (start.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0
+          || end.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
+        return null;
+      }
+      return new ChecksumRange(start.intValueExact(), end.intValueExact());
+    } catch (NumberFormatException | ArithmeticException exception) {
+      return null;
+    }
+  }
+
+  /**
+   * Parses one checksum range and fails hard when unexpectedly invalid.
+   *
+   * @param rangeText checksum range text
+   * @return parsed checksum range
+   */
+  private static ChecksumRange requiredChecksumRange(String rangeText) {
+    ChecksumRange checksumRange = parseChecksumRange(rangeText);
+    if (checksumRange == null) {
+      throw new IllegalStateException("Unsupported checksum range: " + rangeText);
+    }
+    return checksumRange;
+  }
+
+  /**
+   * Renders one resolved if-condition tree into C++ source.
+   *
+   * @param condition resolved condition node
+   * @param ownerPrefix owning object prefix (for example {@code this->} or {@code value.})
+   * @return C++ condition expression
+   */
+  private static String ifConditionExpression(ResolvedIfCondition condition, String ownerPrefix) {
+    if (condition instanceof ResolvedIfComparison resolvedIfComparison) {
+      return comparisonExpression(resolvedIfComparison, ownerPrefix);
+    }
+    if (condition instanceof ResolvedIfLogicalCondition resolvedIfLogicalCondition) {
+      return "("
+          + ifConditionExpression(resolvedIfLogicalCondition.left(), ownerPrefix)
+          + " "
+          + logicalCppOperator(resolvedIfLogicalCondition.operator())
+          + " "
+          + ifConditionExpression(resolvedIfLogicalCondition.right(), ownerPrefix)
+          + ")";
+    }
+    throw new IllegalStateException("Unsupported if condition node: " + condition);
+  }
+
+  /**
+   * Renders one primitive comparison node into C++ source.
+   *
+   * @param comparison resolved comparison node
+   * @param ownerPrefix owning object prefix (for example {@code this->} or {@code value.})
+   * @return C++ comparison expression
+   */
+  private static String comparisonExpression(ResolvedIfComparison comparison, String ownerPrefix) {
+    String fieldExpression = ownerPrefix + comparison.fieldName();
+    String operator = comparisonOperatorSymbol(comparison.operator());
+    if (isUnsignedPrimitive(comparison.fieldType())) {
+      return "(static_cast<std::uint64_t>("
+          + fieldExpression
+          + ") "
+          + operator
+          + " "
+          + comparison.literal()
+          + "ULL)";
+    }
+    return "(static_cast<std::int64_t>("
+        + fieldExpression
+        + ") "
+        + operator
+        + " "
+        + comparison.literal()
+        + "LL)";
+  }
+
+  /**
+   * Returns whether one primitive type is unsigned.
+   *
+   * @param primitiveType primitive type to inspect
+   * @return {@code true} when unsigned
+   */
+  private static boolean isUnsignedPrimitive(PrimitiveType primitiveType) {
+    return primitiveType == PrimitiveType.UINT8
+        || primitiveType == PrimitiveType.UINT16
+        || primitiveType == PrimitiveType.UINT32
+        || primitiveType == PrimitiveType.UINT64;
+  }
+
+  /**
+   * Converts one comparison-operator enum to a C++ symbol.
+   *
+   * @param operator comparison operator
+   * @return C++ operator symbol
+   */
+  private static String comparisonOperatorSymbol(IfComparisonOperator operator) {
+    return switch (operator) {
+      case EQ, NE, LT, LTE, GT, GTE -> operator.symbol();
+      default -> throw new IllegalStateException("Unsupported comparison operator: " + operator);
+    };
+  }
+
+  /**
+   * Converts one logical-operator enum to a C++ symbol.
+   *
+   * @param operator logical operator
+   * @return C++ logical symbol
+   */
+  private static String logicalCppOperator(IfLogicalOperator operator) {
+    return switch (operator) {
+      case AND -> "&&";
+      case OR -> "||";
+      default -> throw new IllegalStateException("Unsupported logical operator: " + operator);
+    };
   }
 
   /**
@@ -3391,6 +4652,14 @@ public final class CppCodeGenerator {
   }
 
   /**
+   * Parsed checksum range bounds.
+   *
+   * @param startInclusive first byte index in range
+   * @param endInclusive last byte index in range
+   */
+  private record ChecksumRange(int startInclusive, int endInclusive) {}
+
+  /**
    * Immutable lookup container used by C++ generation helpers.
    *
    * @param messageTypeByName message type lookup map
@@ -3400,6 +4669,7 @@ public final class CppCodeGenerator {
    * @param reusableVectorByName reusable vector lookup map
    * @param reusableBlobArrayByName reusable blob-array lookup map
    * @param reusableBlobVectorByName reusable blob-vector lookup map
+   * @param reusableVarStringByName reusable varString lookup map
    */
   private record GenerationContext(
       Map<String, ResolvedMessageType> messageTypeByName,
@@ -3408,7 +4678,8 @@ public final class CppCodeGenerator {
       Map<String, ResolvedArray> reusableArrayByName,
       Map<String, ResolvedVector> reusableVectorByName,
       Map<String, ResolvedBlobArray> reusableBlobArrayByName,
-      Map<String, ResolvedBlobVector> reusableBlobVectorByName) {
+      Map<String, ResolvedBlobVector> reusableBlobVectorByName,
+      Map<String, ResolvedVarString> reusableVarStringByName) {
     /** Creates an immutable generation context. */
     private GenerationContext {
       messageTypeByName = Map.copyOf(messageTypeByName);
@@ -3418,6 +4689,7 @@ public final class CppCodeGenerator {
       reusableVectorByName = Map.copyOf(reusableVectorByName);
       reusableBlobArrayByName = Map.copyOf(reusableBlobArrayByName);
       reusableBlobVectorByName = Map.copyOf(reusableBlobVectorByName);
+      reusableVarStringByName = Map.copyOf(reusableVarStringByName);
     }
   }
 }

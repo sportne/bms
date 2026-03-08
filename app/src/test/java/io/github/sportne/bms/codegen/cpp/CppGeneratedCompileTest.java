@@ -33,6 +33,42 @@ class CppGeneratedCompileTest {
     assertFixtureCompiles("specs/collections-slice-valid.xml", "collections");
   }
 
+  /** Contract: C++ code generated from the staged varString/pad fixture compiles cleanly. */
+  @Test
+  void generatedCppFromVarStringPadSliceCompiles() throws Exception {
+    assertFixtureCompiles("specs/varstring-pad-slice-valid.xml", "conditional-staged");
+  }
+
+  /** Contract: C++ code generated from the checksum/if/nested fixture compiles cleanly. */
+  @Test
+  void generatedCppFromConditionalBackendFixtureCompiles() throws Exception {
+    assertFixtureCompiles("specs/conditional-backend-valid.xml", "conditional-backend");
+  }
+
+  /** Contract: C++ code generated from relational/compound if fixtures compiles cleanly. */
+  @Test
+  void generatedCppFromConditionalRelationalFixtureCompiles() throws Exception {
+    assertFixtureCompiles("specs/conditional-if-relational-valid.xml", "conditional-relational");
+  }
+
+  /** Contract: C++ code generated from the crc32 checksum fixture compiles cleanly. */
+  @Test
+  void generatedCppFromChecksumCrc32FixtureCompiles() throws Exception {
+    assertFixtureCompiles("specs/checksum-crc32-valid.xml", "checksum-crc32");
+  }
+
+  /** Contract: C++ code generated from the crc64 checksum fixture compiles cleanly. */
+  @Test
+  void generatedCppFromChecksumCrc64FixtureCompiles() throws Exception {
+    assertFixtureCompiles("specs/checksum-crc64-valid.xml", "checksum-crc64");
+  }
+
+  /** Contract: C++ code generated from the sha256 checksum fixture compiles cleanly. */
+  @Test
+  void generatedCppFromChecksumSha256FixtureCompiles() throws Exception {
+    assertFixtureCompiles("specs/checksum-sha256-valid.xml", "checksum-sha256");
+  }
+
   /**
    * Compiles generated C++ for one fixture.
    *

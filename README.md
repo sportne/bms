@@ -89,9 +89,22 @@ Current Java backend conditional notes:
 - members inside `if` and nested `type` are emitted as fields on the generated class in wire order
 - flattened member names must be unique after expansion or generation fails with diagnostics
 
-Current C++ backend emission is intentionally narrower:
-- foundation scalar fields and message references are generated
-- non-foundation member kinds fail with clear diagnostics during `generate`
+Current C++ backend emission supports:
+- foundation scalar fields and message references
+- numeric slice (`bitField`, `float`, `scaledInt`)
+- collection slice (`array`, `vector`, `blobArray`, `blobVector`)
+- conditional slice (`varString`, `pad`, `checksum`, `if`, nested `type`)
+
+Current C++ backend conditional notes:
+- `checksum` supports `crc16`, `crc32`, `crc64` (ECMA-182), and `sha256`
+- checksum `range` must be `start..end` with non-negative integer indexes and `start <= end`
+- `if` conditions support structured comparisons and text `and`/`or`
+- members inside `if` and nested `type` are flattened into generated fields in wire order
+
+Current C++ runtime test coverage includes:
+- generated C++ compile checks for numeric, collection, and conditional fixtures
+- generated C++ runtime roundtrip checks for those fixtures
+- checksum mismatch failure assertions
 
 The spec now requires `schema@namespace` and allows `messageType@namespace` override.
 

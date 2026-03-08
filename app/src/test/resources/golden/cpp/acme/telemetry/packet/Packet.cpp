@@ -1,5 +1,6 @@
 #include "acme/telemetry/packet/Packet.hpp"
 
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -203,6 +204,181 @@ std::size_t requireCount(T value, const char* fieldName) {
         std::string("Count field ") + fieldName + " is too large for this platform.");
   }
   return static_cast<std::size_t>(count);
+}
+
+void validateChecksumRange(
+    std::size_t availableLength,
+    int rangeStart,
+    int rangeEnd,
+    const char* algorithm,
+    const char* rangeText) {
+  if (rangeStart < 0
+      || rangeEnd < rangeStart
+      || static_cast<std::size_t>(rangeEnd) >= availableLength) {
+    throw std::invalid_argument(
+        std::string("Checksum ")
+        + algorithm
+        + " range "
+        + rangeText
+        + " is out of bounds for "
+        + std::to_string(availableLength)
+        + " available bytes.");
+  }
+}
+
+std::uint16_t crc16(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+  std::uint16_t crc = 0xFFFFU;
+  for (int index = rangeStart; index <= rangeEnd; index++) {
+    crc = static_cast<std::uint16_t>(crc ^ (static_cast<std::uint16_t>(source[index]) << 8U));
+    for (int bit = 0; bit < 8; bit++) {
+      if ((crc & 0x8000U) != 0U) {
+        crc = static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U);
+      } else {
+        crc = static_cast<std::uint16_t>(crc << 1U);
+      }
+    }
+  }
+  return crc;
+}
+
+std::uint32_t crc32(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+  std::uint32_t crc = 0xFFFFFFFFU;
+  for (int index = rangeStart; index <= rangeEnd; index++) {
+    crc ^= static_cast<std::uint32_t>(source[index]);
+    for (int bit = 0; bit < 8; bit++) {
+      if ((crc & 1U) != 0U) {
+        crc = (crc >> 1U) ^ 0xEDB88320U;
+      } else {
+        crc >>= 1U;
+      }
+    }
+  }
+  return crc ^ 0xFFFFFFFFU;
+}
+
+std::uint64_t crc64(std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+  std::uint64_t crc = 0ULL;
+  for (int index = rangeStart; index <= rangeEnd; index++) {
+    crc ^= static_cast<std::uint64_t>(source[index]) << 56U;
+    for (int bit = 0; bit < 8; bit++) {
+      if ((crc & 0x8000000000000000ULL) != 0ULL) {
+        crc = (crc << 1U) ^ 0x42F0E1EBA9EA3693ULL;
+      } else {
+        crc <<= 1U;
+      }
+    }
+  }
+  return crc;
+}
+
+std::uint32_t rotateRight(std::uint32_t value, std::uint32_t bits) {
+  return (value >> bits) | (value << (32U - bits));
+}
+
+constexpr std::uint32_t kSha256RoundConstants[64] = {
+    0x428A2F98U, 0x71374491U, 0xB5C0FBCFU, 0xE9B5DBA5U, 0x3956C25BU, 0x59F111F1U,
+    0x923F82A4U, 0xAB1C5ED5U, 0xD807AA98U, 0x12835B01U, 0x243185BEU, 0x550C7DC3U,
+    0x72BE5D74U, 0x80DEB1FEU, 0x9BDC06A7U, 0xC19BF174U, 0xE49B69C1U, 0xEFBE4786U,
+    0x0FC19DC6U, 0x240CA1CCU, 0x2DE92C6FU, 0x4A7484AAU, 0x5CB0A9DCU, 0x76F988DAU,
+    0x983E5152U, 0xA831C66DU, 0xB00327C8U, 0xBF597FC7U, 0xC6E00BF3U, 0xD5A79147U,
+    0x06CA6351U, 0x14292967U, 0x27B70A85U, 0x2E1B2138U, 0x4D2C6DFCU, 0x53380D13U,
+    0x650A7354U, 0x766A0ABBU, 0x81C2C92EU, 0x92722C85U, 0xA2BFE8A1U, 0xA81A664BU,
+    0xC24B8B70U, 0xC76C51A3U, 0xD192E819U, 0xD6990624U, 0xF40E3585U, 0x106AA070U,
+    0x19A4C116U, 0x1E376C08U, 0x2748774CU, 0x34B0BCB5U, 0x391C0CB3U, 0x4ED8AA4AU,
+    0x5B9CCA4FU, 0x682E6FF3U, 0x748F82EEU, 0x78A5636FU, 0x84C87814U, 0x8CC70208U,
+    0x90BEFFFAU, 0xA4506CEBU, 0xBEF9A3F7U, 0xC67178F2U};
+
+std::array<std::uint8_t, 32> sha256(
+    std::span<const std::uint8_t> source, int rangeStart, int rangeEnd) {
+  std::vector<std::uint8_t> message;
+  message.reserve(static_cast<std::size_t>(rangeEnd - rangeStart + 1) + 72U);
+  for (int index = rangeStart; index <= rangeEnd; index++) {
+    message.push_back(source[index]);
+  }
+
+  std::uint64_t bitLength = static_cast<std::uint64_t>(message.size()) * 8ULL;
+  message.push_back(0x80U);
+  while ((message.size() % 64U) != 56U) {
+    message.push_back(0U);
+  }
+  for (int shift = 56; shift >= 0; shift -= 8) {
+    message.push_back(static_cast<std::uint8_t>((bitLength >> shift) & 0xFFULL));
+  }
+
+  std::uint32_t h0 = 0x6A09E667U;
+  std::uint32_t h1 = 0xBB67AE85U;
+  std::uint32_t h2 = 0x3C6EF372U;
+  std::uint32_t h3 = 0xA54FF53AU;
+  std::uint32_t h4 = 0x510E527FU;
+  std::uint32_t h5 = 0x9B05688CU;
+  std::uint32_t h6 = 0x1F83D9ABU;
+  std::uint32_t h7 = 0x5BE0CD19U;
+
+  for (std::size_t chunkStart = 0; chunkStart < message.size(); chunkStart += 64U) {
+    std::uint32_t words[64] = {};
+    for (std::size_t index = 0; index < 16U; index++) {
+      std::size_t byteIndex = chunkStart + (index * 4U);
+      words[index] = (static_cast<std::uint32_t>(message[byteIndex]) << 24U)
+          | (static_cast<std::uint32_t>(message[byteIndex + 1U]) << 16U)
+          | (static_cast<std::uint32_t>(message[byteIndex + 2U]) << 8U)
+          | static_cast<std::uint32_t>(message[byteIndex + 3U]);
+    }
+    for (std::size_t index = 16U; index < 64U; index++) {
+      std::uint32_t s0 = rotateRight(words[index - 15U], 7U)
+          ^ rotateRight(words[index - 15U], 18U)
+          ^ (words[index - 15U] >> 3U);
+      std::uint32_t s1 = rotateRight(words[index - 2U], 17U)
+          ^ rotateRight(words[index - 2U], 19U)
+          ^ (words[index - 2U] >> 10U);
+      words[index] = words[index - 16U] + s0 + words[index - 7U] + s1;
+    }
+
+    std::uint32_t a = h0;
+    std::uint32_t b = h1;
+    std::uint32_t c = h2;
+    std::uint32_t d = h3;
+    std::uint32_t e = h4;
+    std::uint32_t f = h5;
+    std::uint32_t g = h6;
+    std::uint32_t h = h7;
+
+    for (std::size_t index = 0; index < 64U; index++) {
+      std::uint32_t s1 = rotateRight(e, 6U) ^ rotateRight(e, 11U) ^ rotateRight(e, 25U);
+      std::uint32_t ch = (e & f) ^ ((~e) & g);
+      std::uint32_t temp1 = h + s1 + ch + kSha256RoundConstants[index] + words[index];
+      std::uint32_t s0 = rotateRight(a, 2U) ^ rotateRight(a, 13U) ^ rotateRight(a, 22U);
+      std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+      std::uint32_t temp2 = s0 + maj;
+
+      h = g;
+      g = f;
+      f = e;
+      e = d + temp1;
+      d = c;
+      c = b;
+      b = a;
+      a = temp1 + temp2;
+    }
+
+    h0 += a;
+    h1 += b;
+    h2 += c;
+    h3 += d;
+    h4 += e;
+    h5 += f;
+    h6 += g;
+    h7 += h;
+  }
+
+  std::array<std::uint8_t, 32> digest = {};
+  std::uint32_t hashWords[8] = {h0, h1, h2, h3, h4, h5, h6, h7};
+  for (std::size_t index = 0; index < 8U; index++) {
+    digest[index * 4U] = static_cast<std::uint8_t>((hashWords[index] >> 24U) & 0xFFU);
+    digest[index * 4U + 1U] = static_cast<std::uint8_t>((hashWords[index] >> 16U) & 0xFFU);
+    digest[index * 4U + 2U] = static_cast<std::uint8_t>((hashWords[index] >> 8U) & 0xFFU);
+    digest[index * 4U + 3U] = static_cast<std::uint8_t>(hashWords[index] & 0xFFU);
+  }
+  return digest;
 }
 
 }  // namespace

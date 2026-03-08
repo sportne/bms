@@ -38,6 +38,76 @@ class CppGeneratedRuntimeE2ETest {
         "collections_runtime");
   }
 
+  /** Contract: staged varString/pad generated C++ round-trips correctly at runtime. */
+  @Test
+  void generatedCppVarStringPadSliceRoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/varstring-pad-slice-valid.xml",
+        "conditional_staged",
+        varStringPadRuntimeHarness(),
+        "conditional_staged_runtime");
+  }
+
+  /** Contract: checksum/if/nested generated C++ round-trips correctly at runtime. */
+  @Test
+  void generatedCppConditionalBackendRoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/conditional-backend-valid.xml",
+        "conditional_backend",
+        conditionalBackendRuntimeHarness(),
+        "conditional_backend_runtime");
+  }
+
+  /** Contract: checksum mismatch paths throw and are observable at generated runtime. */
+  @Test
+  void generatedCppConditionalBackendChecksumMismatchFails() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/conditional-backend-valid.xml",
+        "conditional_backend_mismatch",
+        conditionalBackendChecksumMismatchHarness(),
+        "conditional_backend_mismatch_runtime");
+  }
+
+  /** Contract: relational/compound conditional generated C++ round-trips true/false branches. */
+  @Test
+  void generatedCppConditionalRelationalRoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/conditional-if-relational-valid.xml",
+        "conditional_relational",
+        conditionalRelationalRuntimeHarness(),
+        "conditional_relational_runtime");
+  }
+
+  /** Contract: generated C++ round-trips the crc32 checksum fixture. */
+  @Test
+  void generatedCppChecksumCrc32RoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/checksum-crc32-valid.xml",
+        "checksum_crc32",
+        checksumCrc32RuntimeHarness(),
+        "checksum_crc32_runtime");
+  }
+
+  /** Contract: generated C++ round-trips the crc64 checksum fixture. */
+  @Test
+  void generatedCppChecksumCrc64RoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/checksum-crc64-valid.xml",
+        "checksum_crc64",
+        checksumCrc64RuntimeHarness(),
+        "checksum_crc64_runtime");
+  }
+
+  /** Contract: generated C++ round-trips the sha256 checksum fixture. */
+  @Test
+  void generatedCppChecksumSha256RoundTrips() throws Exception {
+    assertRuntimeRoundTrip(
+        "specs/checksum-sha256-valid.xml",
+        "checksum_sha256",
+        checksumSha256RuntimeHarness(),
+        "checksum_sha256_runtime");
+  }
+
   /**
    * Generates C++ for one fixture, compiles a runtime harness, and executes it.
    *
@@ -334,6 +404,346 @@ class CppGeneratedRuntimeE2ETest {
           }
           if (decoded.reusableBlobVectorField != source.reusableBlobVectorField) {
             return 11;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for varString/pad slice roundtrip checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String varStringPadRuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/ConditionalFrame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::ConditionalFrame;
+
+          ConditionalFrame source{};
+          source.nameLength = static_cast<std::uint8_t>(4);
+          source.reusableLength = static_cast<std::uint16_t>(5);
+          source.inlineName = "ABCD";
+          source.inlineTag = "TAG";
+          source.reusableLabel = "HELLO";
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          ConditionalFrame decoded = ConditionalFrame::decode(encoded);
+
+          if (decoded.nameLength != source.nameLength) {
+            return 1;
+          }
+          if (decoded.reusableLength != source.reusableLength) {
+            return 2;
+          }
+          if (decoded.inlineName != source.inlineName) {
+            return 3;
+          }
+          if (decoded.inlineTag != source.inlineTag) {
+            return 4;
+          }
+          if (decoded.reusableLabel != source.reusableLabel) {
+            return 5;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for checksum/if/nested roundtrip checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String conditionalBackendRuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/backend/ConditionalBackendFrame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::backend::ConditionalBackendFrame;
+
+          ConditionalBackendFrame versionOne{};
+          versionOne.version = static_cast<std::uint8_t>(1);
+          versionOne.payload = static_cast<std::uint8_t>(9);
+          versionOne.modeValue = static_cast<std::uint8_t>(7);
+          versionOne.nestedValue = static_cast<std::uint16_t>(4660);
+          versionOne.alwaysValue = static_cast<std::uint8_t>(3);
+
+          std::vector<std::uint8_t> encodedOne = versionOne.encode();
+          ConditionalBackendFrame decodedOne = ConditionalBackendFrame::decode(encodedOne);
+
+          if (decodedOne.version != versionOne.version) {
+            return 1;
+          }
+          if (decodedOne.payload != versionOne.payload) {
+            return 2;
+          }
+          if (decodedOne.modeValue != versionOne.modeValue) {
+            return 3;
+          }
+          if (decodedOne.nestedValue != versionOne.nestedValue) {
+            return 4;
+          }
+          if (decodedOne.alwaysValue != versionOne.alwaysValue) {
+            return 5;
+          }
+
+          ConditionalBackendFrame versionTwo{};
+          versionTwo.version = static_cast<std::uint8_t>(2);
+          versionTwo.payload = static_cast<std::uint8_t>(1);
+          versionTwo.modeValue = static_cast<std::uint8_t>(99);
+          versionTwo.nestedValue = static_cast<std::uint16_t>(9999);
+          versionTwo.alwaysValue = static_cast<std::uint8_t>(4);
+
+          std::vector<std::uint8_t> encodedTwo = versionTwo.encode();
+          ConditionalBackendFrame decodedTwo = ConditionalBackendFrame::decode(encodedTwo);
+
+          if (decodedTwo.version != versionTwo.version) {
+            return 6;
+          }
+          if (decodedTwo.payload != versionTwo.payload) {
+            return 7;
+          }
+          if (decodedTwo.modeValue != static_cast<std::uint8_t>(0)) {
+            return 8;
+          }
+          if (decodedTwo.nestedValue != static_cast<std::uint16_t>(0)) {
+            return 9;
+          }
+          if (decodedTwo.alwaysValue != versionTwo.alwaysValue) {
+            return 10;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for checksum mismatch behavior checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String conditionalBackendChecksumMismatchHarness() {
+    return """
+        #include \"acme/telemetry/conditional/backend/ConditionalBackendFrame.hpp\"
+
+        #include <cstdint>
+        #include <stdexcept>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::backend::ConditionalBackendFrame;
+
+          ConditionalBackendFrame source{};
+          source.version = static_cast<std::uint8_t>(1);
+          source.payload = static_cast<std::uint8_t>(2);
+          source.modeValue = static_cast<std::uint8_t>(3);
+          source.nestedValue = static_cast<std::uint16_t>(4);
+          source.alwaysValue = static_cast<std::uint8_t>(5);
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          encoded[0] = static_cast<std::uint8_t>(encoded[0] ^ 0x01U);
+
+          try {
+            (void) ConditionalBackendFrame::decode(encoded);
+            return 1;
+          } catch (const std::invalid_argument&) {
+            return 0;
+          } catch (...) {
+            return 2;
+          }
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for relational/compound condition checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String conditionalRelationalRuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/relational/ConditionalRelationalFrame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::relational::ConditionalRelationalFrame;
+
+          ConditionalRelationalFrame source{};
+          source.version = static_cast<std::uint8_t>(2);
+          source.ltMode = static_cast<std::uint8_t>(11);
+          source.lteMode = static_cast<std::uint8_t>(12);
+          source.gtMode = static_cast<std::uint8_t>(13);
+          source.gteMode = static_cast<std::uint8_t>(14);
+          source.betweenMode = static_cast<std::uint8_t>(15);
+          source.compoundMode = static_cast<std::uint8_t>(16);
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          ConditionalRelationalFrame decoded = ConditionalRelationalFrame::decode(encoded);
+
+          if (decoded.version != source.version) {
+            return 1;
+          }
+          if (decoded.ltMode != source.ltMode) {
+            return 2;
+          }
+          if (decoded.lteMode != source.lteMode) {
+            return 3;
+          }
+          if (decoded.gtMode != source.gtMode) {
+            return 4;
+          }
+          if (decoded.gteMode != source.gteMode) {
+            return 5;
+          }
+          if (decoded.betweenMode != source.betweenMode) {
+            return 6;
+          }
+          if (decoded.compoundMode != source.compoundMode) {
+            return 7;
+          }
+
+          ConditionalRelationalFrame sourceFalse{};
+          sourceFalse.version = static_cast<std::uint8_t>(0);
+          sourceFalse.ltMode = static_cast<std::uint8_t>(1);
+          sourceFalse.lteMode = static_cast<std::uint8_t>(2);
+          sourceFalse.gtMode = static_cast<std::uint8_t>(3);
+          sourceFalse.gteMode = static_cast<std::uint8_t>(4);
+          sourceFalse.betweenMode = static_cast<std::uint8_t>(5);
+          sourceFalse.compoundMode = static_cast<std::uint8_t>(6);
+
+          std::vector<std::uint8_t> encodedFalse = sourceFalse.encode();
+          ConditionalRelationalFrame decodedFalse = ConditionalRelationalFrame::decode(encodedFalse);
+
+          if (decodedFalse.version != sourceFalse.version) {
+            return 8;
+          }
+          if (decodedFalse.ltMode != sourceFalse.ltMode) {
+            return 9;
+          }
+          if (decodedFalse.lteMode != sourceFalse.lteMode) {
+            return 10;
+          }
+          if (decodedFalse.gtMode != static_cast<std::uint8_t>(0)) {
+            return 11;
+          }
+          if (decodedFalse.gteMode != static_cast<std::uint8_t>(0)) {
+            return 12;
+          }
+          if (decodedFalse.betweenMode != static_cast<std::uint8_t>(0)) {
+            return 13;
+          }
+          if (decodedFalse.compoundMode != static_cast<std::uint8_t>(0)) {
+            return 14;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for crc32 checksum roundtrip checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String checksumCrc32RuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/algorithms/ChecksumCrc32Frame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::algorithms::ChecksumCrc32Frame;
+
+          ChecksumCrc32Frame source{};
+          source.version = static_cast<std::uint8_t>(7);
+          source.payload = static_cast<std::uint8_t>(9);
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          ChecksumCrc32Frame decoded = ChecksumCrc32Frame::decode(encoded);
+
+          if (decoded.version != source.version) {
+            return 1;
+          }
+          if (decoded.payload != source.payload) {
+            return 2;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for crc64 checksum roundtrip checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String checksumCrc64RuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/algorithms/ChecksumCrc64Frame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::algorithms::ChecksumCrc64Frame;
+
+          ChecksumCrc64Frame source{};
+          source.version = static_cast<std::uint8_t>(10);
+          source.payload = static_cast<std::uint8_t>(11);
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          ChecksumCrc64Frame decoded = ChecksumCrc64Frame::decode(encoded);
+
+          if (decoded.version != source.version) {
+            return 1;
+          }
+          if (decoded.payload != source.payload) {
+            return 2;
+          }
+          return 0;
+        }
+        """;
+  }
+
+  /**
+   * Returns runtime C++ harness source for sha256 checksum roundtrip checks.
+   *
+   * @return runtime harness source text
+   */
+  private static String checksumSha256RuntimeHarness() {
+    return """
+        #include \"acme/telemetry/conditional/algorithms/ChecksumSha256Frame.hpp\"
+
+        #include <cstdint>
+        #include <vector>
+
+        int main() {
+          using acme::telemetry::conditional::algorithms::ChecksumSha256Frame;
+
+          ChecksumSha256Frame source{};
+          source.version = static_cast<std::uint8_t>(12);
+          source.payload = static_cast<std::uint8_t>(13);
+
+          std::vector<std::uint8_t> encoded = source.encode();
+          ChecksumSha256Frame decoded = ChecksumSha256Frame::decode(encoded);
+
+          if (decoded.version != source.version) {
+            return 1;
+          }
+          if (decoded.payload != source.payload) {
+            return 2;
           }
           return 0;
         }

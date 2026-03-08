@@ -9,10 +9,17 @@
 
 namespace acme {
 namespace telemetry {
+namespace conditional {
+namespace relational {
 
-struct Header {
+struct ConditionalRelationalFrame {
   std::uint8_t version{};
-  std::uint16_t sequence{};
+  std::uint8_t ltMode{};
+  std::uint8_t lteMode{};
+  std::uint8_t gtMode{};
+  std::uint8_t gteMode{};
+  std::uint8_t betweenMode{};
+  std::uint8_t compoundMode{};
 
   /**
    * Encodes this message instance into wire bytes.
@@ -27,7 +34,7 @@ struct Header {
    * @param data encoded message bytes
    * @return decoded message value
    */
-  static Header decode(std::span<const std::uint8_t> data);
+  static ConditionalRelationalFrame decode(std::span<const std::uint8_t> data);
 
   /**
    * Decodes one message from the current cursor position.
@@ -36,8 +43,10 @@ struct Header {
    * @param cursor current decode cursor; advanced past this message
    * @return decoded message value
    */
-  static Header decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
+  static ConditionalRelationalFrame decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
 };
 
+}  // namespace relational
+}  // namespace conditional
 }  // namespace telemetry
 }  // namespace acme

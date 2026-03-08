@@ -320,6 +320,66 @@ class BmsCliTest {
                 "acme/telemetry/conditional/backend/ConditionalBackendFrame.java")));
   }
 
+  /** Contract: C++ generation succeeds for staged varString/pad conditional fixture. */
+  @Test
+  void generateCommandReturnsSuccessForStagedConditionalSliceSpecInCpp() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path cppOutputDir = tempDir.resolve("cpp-conditional-staged");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/varstring-pad-slice-valid.xml").toString(),
+              "--cpp",
+              cppOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(cppOutputDir.resolve("acme/telemetry/conditional/ConditionalFrame.hpp")));
+    assertTrue(
+        Files.exists(cppOutputDir.resolve("acme/telemetry/conditional/ConditionalFrame.cpp")));
+  }
+
+  /** Contract: C++ generation succeeds for checksum/if/nested conditional backend fixture. */
+  @Test
+  void generateCommandReturnsSuccessForConditionalBackendFixtureInCpp() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path cppOutputDir = tempDir.resolve("cpp-conditional-backend");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/conditional-backend-valid.xml").toString(),
+              "--cpp",
+              cppOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(
+            cppOutputDir.resolve(
+                "acme/telemetry/conditional/backend/ConditionalBackendFrame.hpp")));
+    assertTrue(
+        Files.exists(
+            cppOutputDir.resolve(
+                "acme/telemetry/conditional/backend/ConditionalBackendFrame.cpp")));
+  }
+
   /** Contract: Java generation succeeds for crc64 checksum fixture. */
   @Test
   void generateCommandReturnsSuccessForCrc64ChecksumFixture() {
@@ -560,8 +620,8 @@ class BmsCliTest {
   }
 
   @Test
-  /** Contract: C++ generation also fails clearly for unsupported milestone-03 members. */
-  void generateCommandReturnsSpecErrorForUnsupportedMilestoneThreeMembersInCpp() {
+  /** Contract: C++ generation succeeds for milestone-03 conditional members. */
+  void generateCommandReturnsSuccessForMilestoneThreeMembersInCpp() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
     ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
@@ -579,13 +639,12 @@ class BmsCliTest {
             new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
             new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
 
-    assertEquals(1, exitCode);
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
     assertTrue(
-        stderrBuffer.toString(StandardCharsets.UTF_8).contains("GENERATOR_CPP_UNSUPPORTED_MEMBER"));
+        Files.exists(cppOutputDir.resolve("acme/telemetry/frontend3/FrontendThreeFrame.hpp")));
     assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_CPP_UNSUPPORTED_TYPE_REF"));
+        Files.exists(cppOutputDir.resolve("acme/telemetry/frontend3/FrontendThreeFrame.cpp")));
   }
 
   @Test

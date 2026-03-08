@@ -5,8 +5,8 @@
 - [x] Lock Java baseline with deterministic generation and runtime end-to-end validation.
 - [x] Freeze `0.1.0` fixture matrix in `tasks/fixture-matrix-0.1.0.md`.
 - [x] Lock roadmap milestones and release checklist for `0.1.0` (`tasks/milestone-03.md` to `tasks/milestone-05.md` and `tasks/release-0.1.0-checklist.md`).
-- [ ] Complete Milestone 03: C++ numeric + collection parity.
-- [ ] Complete Milestone 04: C++ conditional parity.
+- [x] Complete Milestone 03: C++ numeric + collection parity.
+- [x] Complete Milestone 04: C++ conditional parity.
 - [ ] Complete Milestone 05: runtime conformance harness and `0.1.0` release hardening.
 
 ## P1
