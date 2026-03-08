@@ -27,6 +27,7 @@ should be updated here first.
 - [ ] Demonstrate project with real world message specification.
 - [ ] Updating project documentation to reflect current project status.
 - [ ] Create users guide / man page.
+- [ ] Setup code analysis on generated code to the same standard as the code in the project. Use clang-tidy and cppcheck as in `../cpp-helper-libs/`.
 
 ## Later enhancements
 

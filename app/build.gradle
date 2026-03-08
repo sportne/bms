@@ -43,7 +43,6 @@ graalvmNative {
 			buildArgs.add('-R:MaxHeapSize=512m')
 			buildArgs.add('-R:MinHeapSize=64m')
 			buildArgs.add('--gc=serial')
-			buildArgs.add('-R:MaxGCPauseMillis=100')
 		}
 
 		named('main') {

@@ -897,94 +897,7 @@ public final class JavaCodeGenerator {
    */
   private static void appendMemberDeclarations(
       StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
-    appendMemberDeclarationsForMembers(builder, messageType.members(), generationContext);
-    builder.append("\n");
-  }
-
-  /**
-   * Appends field declarations for one member list recursively.
-   *
-   * @param builder destination source builder
-   * @param members members to render
-   * @param generationContext reusable lookup maps
-   */
-  private static void appendMemberDeclarationsForMembers(
-      StringBuilder builder,
-      List<ResolvedMessageMember> members,
-      GenerationContext generationContext) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-        appendMemberDeclarationsForMembers(builder, resolvedIfBlock.members(), generationContext);
-        continue;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType) {
-        appendMemberDeclarationsForMembers(
-            builder, resolvedNestedType.members(), generationContext);
-        continue;
-      }
-      if (!isDeclarableMember(member)) {
-        continue;
-      }
-      builder
-          .append("  public ")
-          .append(javaTypeForMember(member, generationContext))
-          .append(' ')
-          .append(memberName(member))
-          .append(";\n");
-    }
-  }
-
-  /**
-   * Returns whether one member kind produces a generated Java field declaration.
-   *
-   * @param member member to inspect
-   * @return {@code true} when the member is emitted as a Java field
-   */
-  private static boolean isDeclarableMember(ResolvedMessageMember member) {
-    return member instanceof ResolvedField
-        || member instanceof ResolvedBitField
-        || member instanceof ResolvedFloat
-        || member instanceof ResolvedScaledInt
-        || member instanceof ResolvedArray
-        || member instanceof ResolvedVector
-        || member instanceof ResolvedBlobArray
-        || member instanceof ResolvedBlobVector
-        || member instanceof ResolvedVarString;
-  }
-
-  /**
-   * Resolves Java declaration type for one member.
-   *
-   * @param member member to inspect
-   * @param generationContext reusable lookup maps
-   * @return Java declaration type
-   */
-  private static String javaTypeForMember(
-      ResolvedMessageMember member, GenerationContext generationContext) {
-    if (member instanceof ResolvedField resolvedField) {
-      return javaTypeForTypeRef(resolvedField.typeRef(), generationContext);
-    }
-    if (member instanceof ResolvedBitField resolvedBitField) {
-      return javaTypeForBitFieldSize(resolvedBitField.size());
-    }
-    if (member instanceof ResolvedFloat || member instanceof ResolvedScaledInt) {
-      return "double";
-    }
-    if (member instanceof ResolvedArray resolvedArray) {
-      return javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext) + "[]";
-    }
-    if (member instanceof ResolvedVector resolvedVector) {
-      return javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext)
-          + "[]";
-    }
-    if (member instanceof ResolvedBlobArray || member instanceof ResolvedBlobVector) {
-      return "byte[]";
-    }
-    if (member instanceof ResolvedVarString) {
-      return "String";
-    }
-    throw new IllegalStateException(
-        "Unsupported member type: " + member.getClass().getSimpleName());
+    JavaDeclarationEmitter.appendMemberDeclarations(builder, messageType, generationContext);
   }
 
   /**
@@ -996,43 +909,7 @@ public final class JavaCodeGenerator {
    */
   private static String javaTypeForTypeRef(
       ResolvedTypeRef typeRef, GenerationContext generationContext) {
-    if (typeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
-      return primitiveTypeRef.primitiveType().javaTypeName();
-    }
-    if (typeRef instanceof MessageTypeRef messageTypeRef) {
-      ResolvedMessageType referenced =
-          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
-      return referenced == null ? messageTypeRef.messageTypeName() : referenced.name();
-    }
-    if (typeRef instanceof FloatTypeRef || typeRef instanceof ScaledIntTypeRef) {
-      return "double";
-    }
-    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
-      ResolvedArray resolvedArray =
-          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
-      if (resolvedArray == null) {
-        throw new IllegalStateException("Missing reusable array: " + arrayTypeRef.arrayTypeName());
-      }
-      return javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext) + "[]";
-    }
-    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
-      ResolvedVector resolvedVector =
-          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
-      if (resolvedVector == null) {
-        throw new IllegalStateException(
-            "Missing reusable vector: " + vectorTypeRef.vectorTypeName());
-      }
-      return javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext)
-          + "[]";
-    }
-    if (typeRef instanceof BlobArrayTypeRef || typeRef instanceof BlobVectorTypeRef) {
-      return "byte[]";
-    }
-    if (typeRef instanceof VarStringTypeRef) {
-      return "String";
-    }
-    throw new IllegalStateException(
-        "Unsupported type reference: " + typeRef.getClass().getSimpleName());
+    return JavaTypeRenderer.javaTypeForTypeRef(typeRef, generationContext);
   }
 
   /**
@@ -1044,72 +921,7 @@ public final class JavaCodeGenerator {
    */
   private static String javaElementTypeForCollection(
       ResolvedTypeRef elementTypeRef, GenerationContext generationContext) {
-    if (elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
-      return primitiveTypeRef.primitiveType().javaTypeName();
-    }
-    if (elementTypeRef instanceof MessageTypeRef messageTypeRef) {
-      ResolvedMessageType referenced =
-          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
-      return referenced == null ? messageTypeRef.messageTypeName() : referenced.name();
-    }
-    if (elementTypeRef instanceof FloatTypeRef || elementTypeRef instanceof ScaledIntTypeRef) {
-      return "double";
-    }
-    throw new IllegalStateException(
-        "Unsupported collection element type: " + elementTypeRef.getClass().getSimpleName());
-  }
-
-  /**
-   * Resolves one member name.
-   *
-   * @param member member to inspect
-   * @return member name
-   */
-  private static String memberName(ResolvedMessageMember member) {
-    if (member instanceof ResolvedField resolvedField) {
-      return resolvedField.name();
-    }
-    if (member instanceof ResolvedBitField resolvedBitField) {
-      return resolvedBitField.name();
-    }
-    if (member instanceof ResolvedFloat resolvedFloat) {
-      return resolvedFloat.name();
-    }
-    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
-      return resolvedScaledInt.name();
-    }
-    if (member instanceof ResolvedArray resolvedArray) {
-      return resolvedArray.name();
-    }
-    if (member instanceof ResolvedVector resolvedVector) {
-      return resolvedVector.name();
-    }
-    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
-      return resolvedBlobArray.name();
-    }
-    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
-      return resolvedBlobVector.name();
-    }
-    if (member instanceof ResolvedVarString resolvedVarString) {
-      return resolvedVarString.name();
-    }
-    throw new IllegalStateException(
-        "Unsupported member type: " + member.getClass().getSimpleName());
-  }
-
-  /**
-   * Resolves Java declaration type for bitField storage size.
-   *
-   * @param bitFieldSize bitField size
-   * @return Java type used to store the raw bit container
-   */
-  private static String javaTypeForBitFieldSize(BitFieldSize bitFieldSize) {
-    return switch (bitFieldSize) {
-      case U8 -> "short";
-      case U16 -> "int";
-      case U32 -> "long";
-      case U64 -> "long";
-    };
+    return JavaTypeRenderer.javaElementTypeForCollection(elementTypeRef, generationContext);
   }
 
   /**

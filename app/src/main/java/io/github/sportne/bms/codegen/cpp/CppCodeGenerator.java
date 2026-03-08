@@ -682,189 +682,7 @@ public final class CppCodeGenerator {
    */
   private static void appendMemberDeclarations(
       StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
-    appendMemberDeclarationsRecursive(
-        builder, messageType.members(), messageType.effectiveNamespace(), generationContext);
-  }
-
-  /**
-   * Appends field declarations for one member list, flattening nested/conditional blocks.
-   *
-   * @param builder destination header builder
-   * @param members members to inspect in declaration order
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   */
-  private static void appendMemberDeclarationsRecursive(
-      StringBuilder builder,
-      List<ResolvedMessageMember> members,
-      String currentNamespace,
-      GenerationContext generationContext) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-        appendMemberDeclarationsRecursive(
-            builder, resolvedIfBlock.members(), currentNamespace, generationContext);
-        continue;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType) {
-        appendMemberDeclarationsRecursive(
-            builder, resolvedNestedType.members(), currentNamespace, generationContext);
-        continue;
-      }
-      String cppType = memberCppType(member, currentNamespace, generationContext);
-      if (cppType == null) {
-        continue;
-      }
-      builder.append("  ").append(cppType).append(' ').append(memberName(member)).append("{};\n");
-    }
-  }
-
-  /**
-   * Returns the C++ field type for one resolved message member.
-   *
-   * @param member member whose field type is needed
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   * @return C++ field type, or {@code null} when member has no field declaration
-   */
-  private static String memberCppType(
-      ResolvedMessageMember member, String currentNamespace, GenerationContext generationContext) {
-    if (member instanceof ResolvedField resolvedField) {
-      return toCppTypeForTypeRef(
-          resolvedField.typeRef(), currentNamespace, generationContext, resolvedField.name());
-    }
-    if (member instanceof ResolvedBitField resolvedBitField) {
-      return bitFieldStoragePrimitive(resolvedBitField.size()).cppTypeName();
-    }
-    if (member instanceof ResolvedFloat || member instanceof ResolvedScaledInt) {
-      return "double";
-    }
-    if (member instanceof ResolvedArray resolvedArray) {
-      return "std::array<"
-          + collectionElementCppType(
-              resolvedArray.elementTypeRef(),
-              currentNamespace,
-              generationContext,
-              resolvedArray.name())
-          + ", "
-          + resolvedArray.length()
-          + ">";
-    }
-    if (member instanceof ResolvedVector resolvedVector) {
-      return "std::vector<"
-          + collectionElementCppType(
-              resolvedVector.elementTypeRef(),
-              currentNamespace,
-              generationContext,
-              resolvedVector.name())
-          + ">";
-    }
-    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
-      return "std::array<std::uint8_t, " + resolvedBlobArray.length() + ">";
-    }
-    if (member instanceof ResolvedBlobVector) {
-      return "std::vector<std::uint8_t>";
-    }
-    if (member instanceof ResolvedVarString) {
-      return "std::string";
-    }
-    return null;
-  }
-
-  /**
-   * Resolves one field type reference into its generated C++ field type.
-   *
-   * @param typeRef resolved type reference
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   * @param fieldName field name used in fallback exceptions
-   * @return C++ field type
-   */
-  private static String toCppTypeForTypeRef(
-      ResolvedTypeRef typeRef,
-      String currentNamespace,
-      GenerationContext generationContext,
-      String fieldName) {
-    if (typeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
-      return primitiveTypeRef.primitiveType().cppTypeName();
-    }
-    if (typeRef instanceof MessageTypeRef messageTypeRef) {
-      return cppMessageTypeName(
-          messageTypeRef.messageTypeName(), currentNamespace, generationContext);
-    }
-    if (typeRef instanceof FloatTypeRef || typeRef instanceof ScaledIntTypeRef) {
-      return "double";
-    }
-    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
-      ResolvedArray resolvedArray =
-          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
-      if (resolvedArray == null) {
-        throw new IllegalStateException("Missing reusable array for " + fieldName + '.');
-      }
-      return "std::array<"
-          + collectionElementCppType(
-              resolvedArray.elementTypeRef(), currentNamespace, generationContext, fieldName)
-          + ", "
-          + resolvedArray.length()
-          + ">";
-    }
-    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
-      ResolvedVector resolvedVector =
-          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
-      if (resolvedVector == null) {
-        throw new IllegalStateException("Missing reusable vector for " + fieldName + '.');
-      }
-      return "std::vector<"
-          + collectionElementCppType(
-              resolvedVector.elementTypeRef(), currentNamespace, generationContext, fieldName)
-          + ">";
-    }
-    if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
-      ResolvedBlobArray resolvedBlobArray =
-          generationContext.reusableBlobArrayByName().get(blobArrayTypeRef.blobArrayTypeName());
-      if (resolvedBlobArray == null) {
-        throw new IllegalStateException("Missing reusable blobArray for " + fieldName + '.');
-      }
-      return "std::array<std::uint8_t, " + resolvedBlobArray.length() + ">";
-    }
-    if (typeRef instanceof BlobVectorTypeRef) {
-      return "std::vector<std::uint8_t>";
-    }
-    if (typeRef instanceof VarStringTypeRef) {
-      return "std::string";
-    }
-    throw new IllegalStateException(
-        "Unsupported type reference: " + typeRef.getClass().getSimpleName());
-  }
-
-  /**
-   * Resolves one collection element type into a C++ type.
-   *
-   * @param elementTypeRef resolved element type reference
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   * @param ownerName owner name used in fallback exceptions
-   * @return C++ element type
-   */
-  private static String collectionElementCppType(
-      ResolvedTypeRef elementTypeRef,
-      String currentNamespace,
-      GenerationContext generationContext,
-      String ownerName) {
-    if (elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
-      return primitiveTypeRef.primitiveType().cppTypeName();
-    }
-    if (elementTypeRef instanceof MessageTypeRef messageTypeRef) {
-      return cppMessageTypeName(
-          messageTypeRef.messageTypeName(), currentNamespace, generationContext);
-    }
-    if (elementTypeRef instanceof FloatTypeRef || elementTypeRef instanceof ScaledIntTypeRef) {
-      return "double";
-    }
-    throw new IllegalStateException(
-        "Unsupported collection element type for "
-            + ownerName
-            + ": "
-            + elementTypeRef.getClass().getSimpleName());
+    CppDeclarationEmitter.appendMemberDeclarations(builder, messageType, generationContext);
   }
 
   /**
@@ -877,14 +695,7 @@ public final class CppCodeGenerator {
    */
   private static String cppMessageTypeName(
       String messageTypeName, String currentNamespace, GenerationContext generationContext) {
-    ResolvedMessageType referenced = generationContext.messageTypeByName().get(messageTypeName);
-    if (referenced == null) {
-      return messageTypeName;
-    }
-    if (referenced.effectiveNamespace().equals(currentNamespace)) {
-      return referenced.name();
-    }
-    return "::" + toCppNamespace(referenced.effectiveNamespace()) + "::" + referenced.name();
+    return CppTypeRenderer.cppMessageTypeName(messageTypeName, currentNamespace, generationContext);
   }
 
   /**
@@ -3218,43 +3029,6 @@ public final class CppCodeGenerator {
   }
 
   /**
-   * Returns the exact declaration name for one member.
-   *
-   * @param member member whose name is needed
-   * @return member name in source order
-   */
-  private static String memberName(ResolvedMessageMember member) {
-    if (member instanceof ResolvedField resolvedField) {
-      return resolvedField.name();
-    }
-    if (member instanceof ResolvedBitField resolvedBitField) {
-      return resolvedBitField.name();
-    }
-    if (member instanceof ResolvedFloat resolvedFloat) {
-      return resolvedFloat.name();
-    }
-    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
-      return resolvedScaledInt.name();
-    }
-    if (member instanceof ResolvedArray resolvedArray) {
-      return resolvedArray.name();
-    }
-    if (member instanceof ResolvedVector resolvedVector) {
-      return resolvedVector.name();
-    }
-    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
-      return resolvedBlobArray.name();
-    }
-    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
-      return resolvedBlobVector.name();
-    }
-    if (member instanceof ResolvedVarString resolvedVarString) {
-      return resolvedVarString.name();
-    }
-    throw new IllegalStateException("Unsupported member has no declaration name: " + member);
-  }
-
-  /**
    * Resolves one bitfield size to the matching primitive storage type.
    *
    * @param bitFieldSize bitfield storage size
@@ -3580,16 +3354,6 @@ public final class CppCodeGenerator {
       }
     }
     return segments;
-  }
-
-  /**
-   * Converts a dot-delimited namespace to a C++ {@code ::}-delimited namespace.
-   *
-   * @param namespaceValue dot-delimited namespace
-   * @return C++ namespace string
-   */
-  private static String toCppNamespace(String namespaceValue) {
-    return String.join("::", splitNamespace(namespaceValue));
   }
 
   /**
