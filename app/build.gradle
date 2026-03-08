@@ -40,6 +40,10 @@ graalvmNative {
 				languageVersion = JavaLanguageVersion.of(21)
 				vendor = org.gradle.jvm.toolchain.JvmVendorSpec.GRAAL_VM
 			}
+			buildArgs.add('-R:MaxHeapSize=512m')
+			buildArgs.add('-R:MinHeapSize=64m')
+			buildArgs.add('--gc=serial')
+			buildArgs.add('-R:MaxGCPauseMillis=100')
 		}
 
 		named('main') {

@@ -21,6 +21,13 @@ should be updated here first.
 - [ ] Add release-check automation for repeatable validation.
 - [ ] Add optional formatting pass for generated Java and C++ output.
 
+## Additional tasks
+
+- [ ] Address gradle deprecation warnings.
+- [ ] Demonstrate project with real world message specification.
+- [ ] Updating project documentation to reflect current project status.
+- [ ] Create users guide / man page.
+
 ## Later enhancements
 
 - [ ] Add Python generator.
@@ -28,6 +35,8 @@ should be updated here first.
 - [ ] Add HTML documentation generation from BMS specs.
 - [ ] Add schema linting command.
 - [ ] Add import/export helpers.
+- [ ] Enhance error handling in generated code.
+- [ ] Add verbose debug tool that takes a message specification and a file that may or may not meet the specifiction.
 
 ## Completed milestones snapshot
 

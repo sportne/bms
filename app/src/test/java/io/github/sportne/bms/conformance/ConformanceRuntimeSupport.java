@@ -17,6 +17,8 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -145,7 +147,20 @@ final class ConformanceRuntimeSupport {
       }
     }
     URL classDirectoryUrl = classDirectory.toUri().toURL();
-    return new URLClassLoader(new URL[] {classDirectoryUrl});
+    return createGeneratedClassLoader(classDirectoryUrl);
+  }
+
+  /**
+   * Creates a class loader inside a privileged block to satisfy SpotBugs security checks.
+   *
+   * @param classDirectoryUrl URL for compiled generated classes
+   * @return class loader that can load compiled generated classes
+   */
+  @SuppressWarnings("removal")
+  private static URLClassLoader createGeneratedClassLoader(URL classDirectoryUrl) {
+    PrivilegedAction<URLClassLoader> action =
+        () -> new URLClassLoader(new URL[] {classDirectoryUrl});
+    return AccessController.doPrivileged(action);
   }
 
   /**
