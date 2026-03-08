@@ -23,7 +23,7 @@ should be updated here first.
 
 ## Additional tasks
 
-- [ ] Address gradle deprecation warnings.
+- [x] Address gradle deprecation warnings.
 - [ ] Demonstrate project with real world message specification.
 - [ ] Updating project documentation to reflect current project status.
 - [ ] Create users guide / man page.

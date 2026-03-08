@@ -91,8 +91,8 @@ spotless {
 }
 
 spotbugs {
-	effort = 'max'
-	reportLevel = 'low'
+	effort = com.github.spotbugs.snom.Effort.MAX
+	reportLevel = com.github.spotbugs.snom.Confidence.valueOf('LOW')
 	ignoreFailures = false
 }
 

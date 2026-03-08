@@ -33,8 +33,11 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
+      - name: Fail on Gradle deprecations
+        run: ./gradlew help --warning-mode fail --console=plain --no-configuration-cache --no-daemon
+
       - name: Run Gradle check
-        run: ./gradlew check --no-daemon
+        run: ./gradlew check --warning-mode all --console=plain --no-daemon
 
   native:
     runs-on: ubuntu-latest
