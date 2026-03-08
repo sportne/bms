@@ -68,6 +68,17 @@
     </xs:restriction>
   </xs:simpleType>
 
+  <xs:simpleType name="ifComparisonOperatorType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="eq"/>
+      <xs:enumeration value="ne"/>
+      <xs:enumeration value="lt"/>
+      <xs:enumeration value="lte"/>
+      <xs:enumeration value="gt"/>
+      <xs:enumeration value="gte"/>
+    </xs:restriction>
+  </xs:simpleType>
+
   <xs:simpleType name="scaledIntBaseType">
     <xs:restriction base="xs:string">
       <xs:enumeration value="int8"/>
@@ -294,7 +305,10 @@
         <xs:element name="type" type="messageType"/>
       </xs:choice>
     </xs:sequence>
-    <xs:attribute name="test" type="xs:string" use="required"/>
+    <xs:attribute name="test" type="xs:string" use="optional"/>
+    <xs:attribute name="field" type="xs:string" use="optional"/>
+    <xs:attribute name="operator" type="ifComparisonOperatorType" use="optional"/>
+    <xs:attribute name="value" type="xs:string" use="optional"/>
   </xs:complexType>
 
   <!-- =================================================== -->

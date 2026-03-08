@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.invalid">
+  <messageType
+      name="InvalidIfMissingStructuredAttribute"
+      comment="Invalid structured conditional without value attribute">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <if field="version" operator="eq">
+      <field name="modeValue" type="uint8" comment="Mode value"/>
+    </if>
+  </messageType>
+</schema>

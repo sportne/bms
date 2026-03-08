@@ -64,11 +64,11 @@ import java.util.regex.Pattern;
  *
  * <p>Each message type becomes one Java class with deterministic field declarations plus
  * encode/decode logic. This generator currently supports foundation, numeric, collection, and
- * staged conditional members ({@code varString} and {@code pad}).
+ * conditional members.
  */
 public final class JavaCodeGenerator {
   private static final Pattern IF_TEST_PATTERN =
-      Pattern.compile("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(==|!=)\\s*([^\\s]+)\\s*$");
+      Pattern.compile("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(==|!=|<=|>=|<|>)\\s*([^\\s]+)\\s*$");
 
   private static final String SHARED_IO_HELPERS =
       """
@@ -441,6 +441,49 @@ public final class JavaCodeGenerator {
       }
 
       /**
+       * Computes CRC-64/ECMA-182 over one byte-array range.
+       *
+       * @param source source bytes
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 64-bit checksum value
+       */
+      private static long crc64(byte[] source, int rangeStart, int rangeEnd) {
+        long crc = 0L;
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc ^= (source[index] & 0xFFL) << 56;
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000000000000000L) != 0L) {
+              crc = (crc << 1) ^ 0x42F0E1EBA9EA3693L;
+            } else {
+              crc = crc << 1;
+            }
+          }
+        }
+        return crc;
+      }
+
+      /**
+       * Computes SHA-256 over one byte-array range.
+       *
+       * @param source source bytes
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 32-byte digest value
+       */
+      private static byte[] sha256(byte[] source, int rangeStart, int rangeEnd) {
+        try {
+          java.security.MessageDigest digest =
+              java.security.MessageDigest.getInstance("SHA-256");
+          digest.update(source, rangeStart, (rangeEnd - rangeStart) + 1);
+          return digest.digest();
+        } catch (java.security.NoSuchAlgorithmException exception) {
+          throw new IllegalStateException(
+              "SHA-256 digest is not available in this JDK.", exception);
+        }
+      }
+
+      /**
        * Computes CRC-16/CCITT-FALSE over one byte-buffer range.
        *
        * @param input source byte buffer
@@ -485,6 +528,60 @@ public final class JavaCodeGenerator {
           crc32.update(input.get(index) & 0xFF);
         }
         return crc32.getValue();
+      }
+
+      /**
+       * Computes CRC-64/ECMA-182 over one byte-buffer range.
+       *
+       * @param input source byte buffer
+       * @param messageStartPosition start index of the decoded message
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 64-bit checksum value
+       */
+      private static long crc64(
+          ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+        int absoluteStart = messageStartPosition + rangeStart;
+        int absoluteEnd = messageStartPosition + rangeEnd;
+        long crc = 0L;
+        for (int index = absoluteStart; index <= absoluteEnd; index++) {
+          crc ^= (input.get(index) & 0xFFL) << 56;
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000000000000000L) != 0L) {
+              crc = (crc << 1) ^ 0x42F0E1EBA9EA3693L;
+            } else {
+              crc = crc << 1;
+            }
+          }
+        }
+        return crc;
+      }
+
+      /**
+       * Computes SHA-256 over one byte-buffer range.
+       *
+       * @param input source byte buffer
+       * @param messageStartPosition start index of the decoded message
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 32-byte digest value
+       */
+      private static byte[] sha256(
+          ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+        int absoluteStart = messageStartPosition + rangeStart;
+        int absoluteEnd = messageStartPosition + rangeEnd;
+        try {
+          java.security.MessageDigest digest =
+              java.security.MessageDigest.getInstance("SHA-256");
+          ByteBuffer slice = input.duplicate();
+          slice.position(absoluteStart);
+          slice.limit(absoluteEnd + 1);
+          digest.update(slice);
+          return digest.digest();
+        } catch (java.security.NoSuchAlgorithmException exception) {
+          throw new IllegalStateException(
+              "SHA-256 digest is not available in this JDK.", exception);
+        }
       }
       """
           .indent(2)
@@ -1037,7 +1134,10 @@ public final class JavaCodeGenerator {
    * @return {@code true} when encode/decode logic exists for the algorithm
    */
   private static boolean isSupportedChecksumAlgorithm(String algorithm) {
-    return "crc16".equals(algorithm) || "crc32".equals(algorithm);
+    return "crc16".equals(algorithm)
+        || "crc32".equals(algorithm)
+        || "crc64".equals(algorithm)
+        || "sha256".equals(algorithm);
   }
 
   /**
@@ -3283,6 +3383,7 @@ public final class JavaCodeGenerator {
   private static void appendEncodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
     ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    String algorithm = resolvedChecksum.algorithm();
     builder
         .append("    {\n")
         .append("      byte[] checksumSource = out.toByteArray();\n")
@@ -3296,7 +3397,7 @@ public final class JavaCodeGenerator {
         .append(resolvedChecksum.range())
         .append("\");\n");
 
-    if ("crc16".equals(resolvedChecksum.algorithm())) {
+    if ("crc16".equals(algorithm)) {
       builder
           .append("      int checksumValue = crc16(checksumSource, ")
           .append(checksumRange.startInclusive())
@@ -3304,7 +3405,7 @@ public final class JavaCodeGenerator {
           .append(checksumRange.endInclusive())
           .append(");\n")
           .append("      writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);\n");
-    } else {
+    } else if ("crc32".equals(algorithm)) {
       builder
           .append("      long checksumValue = crc32(checksumSource, ")
           .append(checksumRange.startInclusive())
@@ -3312,6 +3413,24 @@ public final class JavaCodeGenerator {
           .append(checksumRange.endInclusive())
           .append(");\n")
           .append("      writeUInt32(out, checksumValue, ByteOrder.BIG_ENDIAN);\n");
+    } else if ("crc64".equals(algorithm)) {
+      builder
+          .append("      long checksumValue = crc64(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      writeUInt64(out, checksumValue, ByteOrder.BIG_ENDIAN);\n");
+    } else if ("sha256".equals(algorithm)) {
+      builder
+          .append("      byte[] checksumValue = sha256(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      out.write(checksumValue, 0, checksumValue.length);\n");
+    } else {
+      throw new IllegalStateException("Unsupported checksum algorithm: " + algorithm);
     }
     builder.append("    }\n");
   }
@@ -4369,6 +4488,7 @@ public final class JavaCodeGenerator {
   private static void appendDecodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
     ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    String algorithm = resolvedChecksum.algorithm();
     builder
         .append("    {\n")
         .append("      validateChecksumRange(input.limit() - messageStartPosition, ")
@@ -4381,7 +4501,7 @@ public final class JavaCodeGenerator {
         .append(resolvedChecksum.range())
         .append("\");\n");
 
-    if ("crc16".equals(resolvedChecksum.algorithm())) {
+    if ("crc16".equals(algorithm)) {
       builder
           .append("      int expectedChecksum = readUInt16(input, ByteOrder.BIG_ENDIAN);\n")
           .append("      int actualChecksum = crc16(input, messageStartPosition, ")
@@ -4394,7 +4514,7 @@ public final class JavaCodeGenerator {
           .append(resolvedChecksum.range())
           .append(". Expected \" + expectedChecksum + \", computed \" + actualChecksum + '.');\n")
           .append("      }\n");
-    } else {
+    } else if ("crc32".equals(algorithm)) {
       builder
           .append("      long expectedChecksum = readUInt32(input, ByteOrder.BIG_ENDIAN);\n")
           .append("      long actualChecksum = crc32(input, messageStartPosition, ")
@@ -4407,6 +4527,37 @@ public final class JavaCodeGenerator {
           .append(resolvedChecksum.range())
           .append(". Expected \" + expectedChecksum + \", computed \" + actualChecksum + '.');\n")
           .append("      }\n");
+    } else if ("crc64".equals(algorithm)) {
+      builder
+          .append("      long expectedChecksum = readUInt64(input, ByteOrder.BIG_ENDIAN);\n")
+          .append("      long actualChecksum = crc64(input, messageStartPosition, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      if (Long.compareUnsigned(expectedChecksum, actualChecksum) != 0) {\n")
+          .append("        throw new IllegalArgumentException(\"Checksum mismatch for crc64 range ")
+          .append(resolvedChecksum.range())
+          .append(". Expected \" + Long.toUnsignedString(expectedChecksum)")
+          .append(" + \", computed \" + Long.toUnsignedString(actualChecksum) + '.');\n")
+          .append("      }\n");
+    } else if ("sha256".equals(algorithm)) {
+      builder
+          .append("      byte[] expectedChecksum = new byte[32];\n")
+          .append("      input.get(expectedChecksum);\n")
+          .append("      byte[] actualChecksum = sha256(input, messageStartPosition, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      if (!java.util.Arrays.equals(expectedChecksum, actualChecksum)) {\n")
+          .append(
+              "        throw new IllegalArgumentException(\"Checksum mismatch for sha256 range ")
+          .append(resolvedChecksum.range())
+          .append(".\");\n")
+          .append("      }\n");
+    } else {
+      throw new IllegalStateException("Unsupported checksum algorithm: " + algorithm);
     }
     builder.append("    }\n");
   }
@@ -4594,7 +4745,8 @@ public final class JavaCodeGenerator {
   /**
    * Parses one if-condition expression.
    *
-   * <p>The supported syntax is {@code field == literal} or {@code field != literal}.
+   * <p>The supported syntax is one field compared with one numeric literal using {@code ==}, {@code
+   * !=}, {@code <}, {@code <=}, {@code >}, or {@code >=}.
    *
    * @param test raw if@test text
    * @return parsed condition, or {@code null} when unsupported
@@ -4632,25 +4784,54 @@ public final class JavaCodeGenerator {
       throw new IllegalStateException("if@test references unknown primitive field: " + test);
     }
 
-    String operator = "==".equals(ifCondition.operator()) ? "==" : "!=";
     String fieldExpression = ownerPrefix + ifCondition.fieldName();
     if (primitiveType == PrimitiveType.UINT64) {
-      String comparisonOperator = "==".equals(operator) ? "==" : "!=";
       return "(Long.compareUnsigned("
           + fieldExpression
           + ", Long.parseUnsignedLong(\""
           + ifCondition.literal()
           + "\")) "
-          + comparisonOperator
-          + " 0)";
+          + unsignedLongComparisonSuffix(ifCondition.operator())
+          + ")";
     }
     return "("
         + countExpression(fieldExpression, primitiveType)
         + " "
-        + operator
+        + signedLongComparisonOperator(ifCondition.operator())
         + " "
         + ifCondition.literal()
         + "L)";
+  }
+
+  /**
+   * Converts a parsed operator to the Java operator used for signed long comparisons.
+   *
+   * @param operator parsed operator from {@code if@test}
+   * @return Java operator for signed long comparison
+   */
+  private static String signedLongComparisonOperator(String operator) {
+    return switch (operator) {
+      case "==", "!=", "<", "<=", ">", ">=" -> operator;
+      default -> throw new IllegalStateException("Unsupported operator: " + operator);
+    };
+  }
+
+  /**
+   * Converts a parsed operator to the suffix used with {@link Long#compareUnsigned(long, long)}.
+   *
+   * @param operator parsed operator from {@code if@test}
+   * @return Java comparison suffix, for example {@code == 0} or {@code < 0}
+   */
+  private static String unsignedLongComparisonSuffix(String operator) {
+    return switch (operator) {
+      case "==" -> "== 0";
+      case "!=" -> "!= 0";
+      case "<" -> "< 0";
+      case "<=" -> "<= 0";
+      case ">" -> "> 0";
+      case ">=" -> ">= 0";
+      default -> throw new IllegalStateException("Unsupported operator: " + operator);
+    };
   }
 
   /**
@@ -4778,7 +4959,8 @@ public final class JavaCodeGenerator {
    *
    * @param rawTest original if@test text
    * @param fieldName referenced field name
-   * @param operator supported operator ({@code ==} or {@code !=})
+   * @param operator supported operator ({@code ==}, {@code !=}, {@code <}, {@code <=}, {@code >},
+   *     or {@code >=})
    * @param literal parsed numeric literal
    */
   private record IfCondition(

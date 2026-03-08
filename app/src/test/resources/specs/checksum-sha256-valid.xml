@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.algorithms">
+  <messageType name="ChecksumSha256Frame" comment="Valid sha256 checksum backend fixture">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <field name="payload" type="uint8" comment="Payload byte"/>
+    <checksum alg="sha256" range="0..1" comment="SHA-256 over the first two bytes"/>
+  </messageType>
+</schema>

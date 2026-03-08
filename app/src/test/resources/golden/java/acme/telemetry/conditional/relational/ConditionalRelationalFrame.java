@@ -1,4 +1,4 @@
-package acme.telemetry.conditional.backend;
+package acme.telemetry.conditional.relational;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -6,30 +6,29 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Objects;
-import java.util.zip.CRC32;
 
-public final class ConditionalBackendFrame {
+public final class ConditionalRelationalFrame {
   public short version;
-  public short payload;
-  public short modeValue;
-  public int nestedValue;
-  public short alwaysValue;
+  public short ltMode;
+  public short lteMode;
+  public short gtMode;
+  public short gteMode;
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     writeUInt8(out, this.version);
-    writeUInt8(out, this.payload);
-    {
-      byte[] checksumSource = out.toByteArray();
-      validateChecksumRange(checksumSource.length, 0, 1, "crc16", "0..1");
-      int checksumValue = crc16(checksumSource, 0, 1);
-      writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);
+    if (((this.version & 0xFFL) < 10L)) {
+    writeUInt8(out, this.ltMode);
     }
-    if (((this.version & 0xFFL) == 1L)) {
-    writeUInt8(out, this.modeValue);
-    writeUInt16(out, this.nestedValue, ByteOrder.BIG_ENDIAN);
+    if (((this.version & 0xFFL) <= 10L)) {
+    writeUInt8(out, this.lteMode);
     }
-    writeUInt8(out, this.alwaysValue);
+    if (((this.version & 0xFFL) > 1L)) {
+    writeUInt8(out, this.gtMode);
+    }
+    if (((this.version & 0xFFL) >= 1L)) {
+    writeUInt8(out, this.gteMode);
+    }
     return out.toByteArray();
   }
 
@@ -37,9 +36,9 @@ public final class ConditionalBackendFrame {
    * Decodes a message instance from a byte array.
    *
    * @param bytes encoded message bytes
-   * @return decoded ConditionalBackendFrame value
+   * @return decoded ConditionalRelationalFrame value
    */
-  public static ConditionalBackendFrame decode(byte[] bytes) {
+  public static ConditionalRelationalFrame decode(byte[] bytes) {
     Objects.requireNonNull(bytes, "bytes");
     return decode(ByteBuffer.wrap(bytes));
   }
@@ -48,27 +47,24 @@ public final class ConditionalBackendFrame {
    * Decodes a message instance from a byte buffer.
    *
    * @param input buffer positioned at the start of this message
-   * @return decoded ConditionalBackendFrame value
+   * @return decoded ConditionalRelationalFrame value
    */
-  public static ConditionalBackendFrame decode(ByteBuffer input) {
+  public static ConditionalRelationalFrame decode(ByteBuffer input) {
     Objects.requireNonNull(input, "input");
-    int messageStartPosition = input.position();
-    ConditionalBackendFrame value = new ConditionalBackendFrame();
+    ConditionalRelationalFrame value = new ConditionalRelationalFrame();
     value.version = readUInt8(input);
-    value.payload = readUInt8(input);
-    {
-      validateChecksumRange(input.limit() - messageStartPosition, 0, 1, "crc16", "0..1");
-      int expectedChecksum = readUInt16(input, ByteOrder.BIG_ENDIAN);
-      int actualChecksum = crc16(input, messageStartPosition, 0, 1);
-      if (expectedChecksum != actualChecksum) {
-        throw new IllegalArgumentException("Checksum mismatch for crc16 range 0..1. Expected " + expectedChecksum + ", computed " + actualChecksum + '.');
-      }
+    if (((value.version & 0xFFL) < 10L)) {
+    value.ltMode = readUInt8(input);
     }
-    if (((value.version & 0xFFL) == 1L)) {
-    value.modeValue = readUInt8(input);
-    value.nestedValue = readUInt16(input, ByteOrder.BIG_ENDIAN);
+    if (((value.version & 0xFFL) <= 10L)) {
+    value.lteMode = readUInt8(input);
     }
-    value.alwaysValue = readUInt8(input);
+    if (((value.version & 0xFFL) > 1L)) {
+    value.gtMode = readUInt8(input);
+    }
+    if (((value.version & 0xFFL) >= 1L)) {
+    value.gteMode = readUInt8(input);
+    }
     return value;
   }
 
@@ -367,214 +363,5 @@ public final class ConditionalBackendFrame {
           "Rounded value for " + fieldName + " is outside unsigned raw range.");
     }
     return rounded;
-  }
-  /**
-   * Validates one checksum byte range against available source length.
-   *
-   * @param availableLength available byte count in the source
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @param algorithm checksum algorithm name
-   * @param rangeText original range text used in exception messages
-   */
-  private static void validateChecksumRange(
-      int availableLength,
-      int rangeStart,
-      int rangeEnd,
-      String algorithm,
-      String rangeText) {
-    if (rangeStart < 0 || rangeEnd < rangeStart || rangeEnd >= availableLength) {
-      throw new IllegalArgumentException(
-          "Checksum "
-              + algorithm
-              + " range "
-              + rangeText
-              + " is out of bounds for "
-              + availableLength
-              + " available bytes.");
-    }
-  }
-
-  /**
-   * Computes CRC-16/CCITT-FALSE over one byte-array range.
-   *
-   * @param source source bytes
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 16-bit checksum value
-   */
-  private static int crc16(byte[] source, int rangeStart, int rangeEnd) {
-    int crc = 0xFFFF;
-    for (int index = rangeStart; index <= rangeEnd; index++) {
-      crc ^= (source[index] & 0xFF) << 8;
-      for (int bit = 0; bit < 8; bit++) {
-        if ((crc & 0x8000) != 0) {
-          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
-        } else {
-          crc = (crc << 1) & 0xFFFF;
-        }
-      }
-    }
-    return crc & 0xFFFF;
-  }
-
-  /**
-   * Computes CRC-32 over one byte-array range.
-   *
-   * @param source source bytes
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 32-bit checksum value
-   */
-  private static long crc32(byte[] source, int rangeStart, int rangeEnd) {
-    CRC32 crc32 = new CRC32();
-    for (int index = rangeStart; index <= rangeEnd; index++) {
-      crc32.update(source[index] & 0xFF);
-    }
-    return crc32.getValue();
-  }
-
-  /**
-   * Computes CRC-64/ECMA-182 over one byte-array range.
-   *
-   * @param source source bytes
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 64-bit checksum value
-   */
-  private static long crc64(byte[] source, int rangeStart, int rangeEnd) {
-    long crc = 0L;
-    for (int index = rangeStart; index <= rangeEnd; index++) {
-      crc ^= (source[index] & 0xFFL) << 56;
-      for (int bit = 0; bit < 8; bit++) {
-        if ((crc & 0x8000000000000000L) != 0L) {
-          crc = (crc << 1) ^ 0x42F0E1EBA9EA3693L;
-        } else {
-          crc = crc << 1;
-        }
-      }
-    }
-    return crc;
-  }
-
-  /**
-   * Computes SHA-256 over one byte-array range.
-   *
-   * @param source source bytes
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 32-byte digest value
-   */
-  private static byte[] sha256(byte[] source, int rangeStart, int rangeEnd) {
-    try {
-      java.security.MessageDigest digest =
-          java.security.MessageDigest.getInstance("SHA-256");
-      digest.update(source, rangeStart, (rangeEnd - rangeStart) + 1);
-      return digest.digest();
-    } catch (java.security.NoSuchAlgorithmException exception) {
-      throw new IllegalStateException(
-          "SHA-256 digest is not available in this JDK.", exception);
-    }
-  }
-
-  /**
-   * Computes CRC-16/CCITT-FALSE over one byte-buffer range.
-   *
-   * @param input source byte buffer
-   * @param messageStartPosition start index of the decoded message
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 16-bit checksum value
-   */
-  private static int crc16(
-      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
-    int absoluteStart = messageStartPosition + rangeStart;
-    int absoluteEnd = messageStartPosition + rangeEnd;
-    int crc = 0xFFFF;
-    for (int index = absoluteStart; index <= absoluteEnd; index++) {
-      crc ^= (input.get(index) & 0xFF) << 8;
-      for (int bit = 0; bit < 8; bit++) {
-        if ((crc & 0x8000) != 0) {
-          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
-        } else {
-          crc = (crc << 1) & 0xFFFF;
-        }
-      }
-    }
-    return crc & 0xFFFF;
-  }
-
-  /**
-   * Computes CRC-32 over one byte-buffer range.
-   *
-   * @param input source byte buffer
-   * @param messageStartPosition start index of the decoded message
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 32-bit checksum value
-   */
-  private static long crc32(
-      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
-    int absoluteStart = messageStartPosition + rangeStart;
-    int absoluteEnd = messageStartPosition + rangeEnd;
-    CRC32 crc32 = new CRC32();
-    for (int index = absoluteStart; index <= absoluteEnd; index++) {
-      crc32.update(input.get(index) & 0xFF);
-    }
-    return crc32.getValue();
-  }
-
-  /**
-   * Computes CRC-64/ECMA-182 over one byte-buffer range.
-   *
-   * @param input source byte buffer
-   * @param messageStartPosition start index of the decoded message
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 64-bit checksum value
-   */
-  private static long crc64(
-      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
-    int absoluteStart = messageStartPosition + rangeStart;
-    int absoluteEnd = messageStartPosition + rangeEnd;
-    long crc = 0L;
-    for (int index = absoluteStart; index <= absoluteEnd; index++) {
-      crc ^= (input.get(index) & 0xFFL) << 56;
-      for (int bit = 0; bit < 8; bit++) {
-        if ((crc & 0x8000000000000000L) != 0L) {
-          crc = (crc << 1) ^ 0x42F0E1EBA9EA3693L;
-        } else {
-          crc = crc << 1;
-        }
-      }
-    }
-    return crc;
-  }
-
-  /**
-   * Computes SHA-256 over one byte-buffer range.
-   *
-   * @param input source byte buffer
-   * @param messageStartPosition start index of the decoded message
-   * @param rangeStart first checksum byte index (inclusive)
-   * @param rangeEnd last checksum byte index (inclusive)
-   * @return computed 32-byte digest value
-   */
-  private static byte[] sha256(
-      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
-    int absoluteStart = messageStartPosition + rangeStart;
-    int absoluteEnd = messageStartPosition + rangeEnd;
-    try {
-      java.security.MessageDigest digest =
-          java.security.MessageDigest.getInstance("SHA-256");
-      ByteBuffer slice = input.duplicate();
-      slice.position(absoluteStart);
-      slice.limit(absoluteEnd + 1);
-      digest.update(slice);
-      return digest.digest();
-    } catch (java.security.NoSuchAlgorithmException exception) {
-      throw new IllegalStateException(
-          "SHA-256 digest is not available in this JDK.", exception);
-    }
   }
 }

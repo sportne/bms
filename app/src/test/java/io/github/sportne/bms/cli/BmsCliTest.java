@@ -147,6 +147,27 @@ class BmsCliTest {
     assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
   }
 
+  /** Contract: `validate` succeeds for relational `if@test` fixture input. */
+  @Test
+  void validateCommandReturnsSuccessForRelationalConditionalSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate",
+              TestSupport.resourcePath("specs/conditional-if-relational-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
   @Test
   /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
@@ -245,6 +266,90 @@ class BmsCliTest {
                 "acme/telemetry/conditional/backend/ConditionalBackendFrame.java")));
   }
 
+  /** Contract: Java generation succeeds for crc64 checksum fixture. */
+  @Test
+  void generateCommandReturnsSuccessForCrc64ChecksumFixture() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-checksum-crc64");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/checksum-crc64-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(
+            javaOutputDir.resolve(
+                "acme/telemetry/conditional/algorithms/ChecksumCrc64Frame.java")));
+  }
+
+  /** Contract: Java generation succeeds for sha256 checksum fixture. */
+  @Test
+  void generateCommandReturnsSuccessForSha256ChecksumFixture() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-checksum-sha256");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/checksum-sha256-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(
+            javaOutputDir.resolve(
+                "acme/telemetry/conditional/algorithms/ChecksumSha256Frame.java")));
+  }
+
+  /** Contract: Java generation succeeds for relational `if@test` operators. */
+  @Test
+  void generateCommandReturnsSuccessForRelationalConditionalFixture() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-relational-if");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/conditional-if-relational-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(
+            javaOutputDir.resolve(
+                "acme/telemetry/conditional/relational/ConditionalRelationalFrame.java")));
+  }
+
   @Test
   /** Contract: unsupported if-expression syntax still fails clearly in Java generation. */
   void generateCommandReturnsSpecErrorForUnsupportedIfTestExpression() {
@@ -286,6 +391,87 @@ class BmsCliTest {
             new String[] {
               "generate",
               TestSupport.resourcePath("specs/checksum-invalid-range.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  /** Contract: invalid crc64 checksum ranges fail clearly during Java generation. */
+  @Test
+  void generateCommandReturnsSpecErrorForInvalidCrc64ChecksumRange() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-invalid-checksum-range-crc64");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/checksum-crc64-invalid-range.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  /** Contract: invalid sha256 checksum ranges fail clearly during Java generation. */
+  @Test
+  void generateCommandReturnsSpecErrorForInvalidSha256ChecksumRange() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-invalid-checksum-range-sha256");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/checksum-sha256-invalid-range.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  /** Contract: out-of-range relational if@test literals fail clearly during generation. */
+  @Test
+  void generateCommandReturnsSpecErrorForOutOfRangeRelationalIfLiterals() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-invalid-relational-if");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/conditional-if-relational-invalid.xml").toString(),
               "--java",
               javaOutputDir.toString()
             },

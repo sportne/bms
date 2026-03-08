@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.invalid">
+  <messageType name="InvalidIfCombination" comment="Invalid mixed conditional attribute style">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <if test="version == 1" field="version" operator="eq" value="1">
+      <field name="modeValue" type="uint8" comment="Mode value"/>
+    </if>
+  </messageType>
+</schema>

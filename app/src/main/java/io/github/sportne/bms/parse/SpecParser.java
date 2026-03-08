@@ -795,9 +795,59 @@ public final class SpecParser {
    */
   private ParsedIfBlock parseIfBlock(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
-    String test = requireAttribute(specPath, reader, "test");
+    String test = reader.getAttributeValue(null, "test");
+    String field = reader.getAttributeValue(null, "field");
+    String operator = reader.getAttributeValue(null, "operator");
+    String value = reader.getAttributeValue(null, "value");
+
+    if (test != null) {
+      if (field != null || operator != null || value != null) {
+        throw parserError(
+            specPath,
+            reader,
+            "PARSER_INVALID_ATTRIBUTE",
+            "<if> must use either test=\"...\" or field/operator/value attributes, not both.");
+      }
+    } else {
+      if (field == null || operator == null || value == null) {
+        throw parserError(
+            specPath,
+            reader,
+            "PARSER_MISSING_ATTRIBUTE",
+            "<if> requires either test=\"...\" or field/operator/value attributes.");
+      }
+      String operatorSymbol = parseIfComparisonOperatorSymbol(specPath, reader, operator);
+      test = field + " " + operatorSymbol + " " + value;
+    }
+
     List<ParsedMessageMember> members = parseMessageMembers(specPath, reader, "if", false);
     return new ParsedIfBlock(test, members);
+  }
+
+  /**
+   * Converts one enum-style if-comparison operator to canonical symbol text.
+   *
+   * @param specPath source file path used in diagnostics
+   * @param reader active XML reader positioned on {@code <if>}
+   * @param operatorValue enum operator literal from XML
+   * @return canonical comparison symbol used by downstream stages
+   * @throws BmsException if the operator value is unsupported
+   */
+  private String parseIfComparisonOperatorSymbol(
+      Path specPath, XMLStreamReader reader, String operatorValue) throws BmsException {
+    return switch (operatorValue) {
+      case "eq" -> "==";
+      case "ne" -> "!=";
+      case "lt" -> "<";
+      case "lte" -> "<=";
+      case "gt" -> ">";
+      case "gte" -> ">=";
+      default -> throw parserError(
+          specPath,
+          reader,
+          "PARSER_INVALID_ATTRIBUTE",
+          "Unsupported if comparison operator value: " + operatorValue);
+    };
   }
 
   /**

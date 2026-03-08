@@ -23,6 +23,7 @@ The repository contains:
 - compiler pipeline foundation (validate → parse → semantic resolve → generate)
 - architecture and semantic-model documentation
 - task lists for incremental milestones
+- runtime end-to-end tests that compile generated Java and run encode/decode checks
 
 ## Initial scope
 
@@ -75,9 +76,13 @@ Current Java backend emission supports:
 - conditional slice (`varString`, `pad`, `checksum`, `if`, nested `type`)
 
 Current Java backend conditional notes:
-- `checksum` currently supports `crc16` and `crc32`
+- `checksum` currently supports `crc16`, `crc32`, `crc64` (ECMA-182), and `sha256`
 - checksum `range` must be `start..end` with non-negative integer indexes and `start <= end`
-- `if@test` currently supports `field == literal` and `field != literal` with numeric literals
+- `if` conditions can be written in two forms:
+  - preferred structured form: `field`, `operator`, `value` (with enum operators `eq`, `ne`, `lt`, `lte`, `gt`, `gte`)
+  - legacy text form: `test="field OP literal"`
+- both forms currently support `==`, `!=`, `<`, `<=`, `>`, and `>=` with numeric literals
+- compound boolean expressions in `if@test` (for example `&&` or `||`) are still rejected with clear diagnostics
 - members inside `if` and nested `type` are emitted as fields on the generated class in wire order
 - flattened member names must be unique after expansion or generation fails with diagnostics
 

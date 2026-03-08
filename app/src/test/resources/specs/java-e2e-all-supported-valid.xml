@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.e2e">
+  <messageType
+      name="AllSupportedFrame"
+      comment="Single message that mixes numeric, collection, and conditional members">
+    <field name="version" type="uint8" comment="Version used by conditionals"/>
+    <field name="count" type="uint8" comment="Vector element count"/>
+    <field name="nameLength" type="uint8" comment="Length of title text"/>
+
+    <bitField name="statusBits" size="u8" comment="Status flags packed into one byte">
+      <flag name="ready" position="0" comment="Ready flag"/>
+      <segment name="mode" from="1" to="2" comment="Mode segment">
+        <variant name="mode0" value="0" comment="Mode zero"/>
+      </segment>
+    </bitField>
+
+    <float name="ratio" size="f32" encoding="ieee754" comment="IEEE float value"/>
+    <scaledInt name="temperature" baseType="int16" scale="0.1" comment="Scaled temperature"/>
+    <checksum alg="sha256" range="0..9" comment="Checksum over fixed-size header bytes"/>
+
+    <array name="fixedValues" elementType="uint8" length="2" comment="Fixed-size byte array"/>
+    <vector name="samples" elementType="uint16" comment="Counted vector of uint16 samples">
+      <countField ref="count"/>
+    </vector>
+    <blobArray name="payload" length="3" comment="Fixed-size payload bytes"/>
+    <blobVector name="tail" comment="Terminated payload bytes">
+      <terminatorValue value="00"/>
+    </blobVector>
+
+    <varString name="title" encoding="ascii" comment="Counted ASCII title">
+      <countField ref="nameLength"/>
+    </varString>
+    <pad bytes="1" comment="Pad byte"/>
+
+    <if field="version" operator="gte" value="2">
+      <field name="modeValue" type="uint8" comment="Conditional mode value"/>
+      <type name="ConditionalPayload" comment="Nested payload inside conditional block">
+        <field name="nestedValue" type="uint16" comment="Conditional nested value"/>
+      </type>
+    </if>
+
+    <type name="AlwaysPayload" comment="Always-decoded nested payload">
+      <field name="alwaysValue" type="uint8" comment="Always-present nested value"/>
+    </type>
+  </messageType>
+</schema>

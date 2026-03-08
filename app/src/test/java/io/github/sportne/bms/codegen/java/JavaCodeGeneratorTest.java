@@ -157,6 +157,73 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("public short alwaysValue;"));
   }
 
+  /** Contract: crc64 checksum fixtures generate deterministic Java checksum code paths. */
+  @Test
+  void javaGeneratorProducesDeterministicCrc64ChecksumOutput() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/checksum-crc64-valid.xml");
+
+    generator.generate(schema, tempDir);
+    generator.generate(schema, tempDir);
+
+    Path outputPath =
+        tempDir.resolve("acme/telemetry/conditional/algorithms/ChecksumCrc64Frame.java");
+    String expected =
+        TestSupport.readResource(
+            "golden/java/acme/telemetry/conditional/algorithms/ChecksumCrc64Frame.java");
+    String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertEquals(expected, actual);
+    assertTrue(actual.contains("long checksumValue = crc64(checksumSource, 0, 1);"));
+    assertTrue(actual.contains("writeUInt64(out, checksumValue, ByteOrder.BIG_ENDIAN);"));
+    assertTrue(actual.contains("Long.compareUnsigned(expectedChecksum, actualChecksum) != 0"));
+  }
+
+  /** Contract: sha256 checksum fixtures generate deterministic Java checksum code paths. */
+  @Test
+  void javaGeneratorProducesDeterministicSha256ChecksumOutput() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/checksum-sha256-valid.xml");
+
+    generator.generate(schema, tempDir);
+    generator.generate(schema, tempDir);
+
+    Path outputPath =
+        tempDir.resolve("acme/telemetry/conditional/algorithms/ChecksumSha256Frame.java");
+    String expected =
+        TestSupport.readResource(
+            "golden/java/acme/telemetry/conditional/algorithms/ChecksumSha256Frame.java");
+    String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertEquals(expected, actual);
+    assertTrue(actual.contains("byte[] checksumValue = sha256(checksumSource, 0, 1);"));
+    assertTrue(actual.contains("byte[] expectedChecksum = new byte[32];"));
+    assertTrue(actual.contains("java.util.Arrays.equals(expectedChecksum, actualChecksum)"));
+  }
+
+  /** Contract: relational if@test operators generate deterministic condition expressions. */
+  @Test
+  void javaGeneratorProducesDeterministicRelationalIfOutput() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/conditional-if-relational-valid.xml");
+
+    generator.generate(schema, tempDir);
+    generator.generate(schema, tempDir);
+
+    Path outputPath =
+        tempDir.resolve("acme/telemetry/conditional/relational/ConditionalRelationalFrame.java");
+    String expected =
+        TestSupport.readResource(
+            "golden/java/acme/telemetry/conditional/relational/ConditionalRelationalFrame.java");
+    String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertEquals(expected, actual);
+    assertTrue(actual.contains("if (((this.version & 0xFFL) < 10L))"));
+    assertTrue(actual.contains("if (((this.version & 0xFFL) <= 10L))"));
+    assertTrue(actual.contains("if (((this.version & 0xFFL) > 1L))"));
+    assertTrue(actual.contains("if (((this.version & 0xFFL) >= 1L))"));
+  }
+
   /** Contract: the coverage fixture drives extended float/scaled/collection Java branches. */
   @Test
   void javaGeneratorCoversExtendedNumericAndCollectionBranches() throws Exception {
@@ -340,7 +407,29 @@ class JavaCodeGeneratorTest {
         exception.diagnostics().stream()
             .map(diagnostic -> diagnostic.message())
             .collect(Collectors.joining("\n"));
-    assertTrue(diagnosticsText.contains("if(test=\"version > 1\")"));
+    assertTrue(diagnosticsText.contains("if(test=\"version > 1 && version < 10\")"));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+  }
+
+  /** Contract: relational if@test literals still enforce primitive range checks. */
+  @Test
+  void javaGeneratorFailsWithClearDiagnosticsForOutOfRangeRelationalIfLiterals() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/conditional-if-relational-invalid.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    String diagnosticsText =
+        exception.diagnostics().stream()
+            .map(diagnostic -> diagnostic.message())
+            .collect(Collectors.joining("\n"));
+    assertTrue(diagnosticsText.contains("if(test=\"version < 300\") literal is out of range"));
+    assertTrue(diagnosticsText.contains("if(test=\"version <= 300\") literal is out of range"));
+    assertTrue(diagnosticsText.contains("if(test=\"version > 300\") literal is out of range"));
+    assertTrue(diagnosticsText.contains("if(test=\"version >= 300\") literal is out of range"));
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
@@ -360,6 +449,44 @@ class JavaCodeGeneratorTest {
             .map(diagnostic -> diagnostic.message())
             .collect(Collectors.joining("\n"));
     assertTrue(diagnosticsText.contains("checksum crc16(invalid range)"));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+  }
+
+  /** Contract: invalid crc64 checksum ranges fail with a clear Java-generator diagnostic. */
+  @Test
+  void javaGeneratorFailsWithClearDiagnosticsForInvalidCrc64ChecksumRange() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/checksum-crc64-invalid-range.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    String diagnosticsText =
+        exception.diagnostics().stream()
+            .map(diagnostic -> diagnostic.message())
+            .collect(Collectors.joining("\n"));
+    assertTrue(diagnosticsText.contains("checksum crc64(invalid range)"));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+  }
+
+  /** Contract: invalid sha256 checksum ranges fail with a clear Java-generator diagnostic. */
+  @Test
+  void javaGeneratorFailsWithClearDiagnosticsForInvalidSha256ChecksumRange() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/checksum-sha256-invalid-range.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    String diagnosticsText =
+        exception.diagnostics().stream()
+            .map(diagnostic -> diagnostic.message())
+            .collect(Collectors.joining("\n"));
+    assertTrue(diagnosticsText.contains("checksum sha256(invalid range)"));
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));

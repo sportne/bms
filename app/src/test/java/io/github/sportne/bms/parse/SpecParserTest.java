@@ -204,6 +204,32 @@ class SpecParserTest {
     assertTrue(ifBlock.members().get(1) instanceof ParsedVarString);
   }
 
+  /** Contract: an `if` block cannot mix legacy `test` and structured comparison attributes. */
+  @Test
+  void parserRejectsMixedIfConditionAttributeStyles() {
+    SpecParser parser = new SpecParser();
+    Path specPath = TestSupport.resourcePath("specs/if-invalid-attribute-combination.xml");
+
+    BmsException exception = assertThrows(BmsException.class, () -> parser.parse(specPath));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("PARSER_INVALID_ATTRIBUTE")));
+  }
+
+  /** Contract: structured if comparisons must include `field`, `operator`, and `value`. */
+  @Test
+  void parserRejectsMissingStructuredIfComparisonAttributes() {
+    SpecParser parser = new SpecParser();
+    Path specPath = TestSupport.resourcePath("specs/if-missing-structured-attribute.xml");
+
+    BmsException exception = assertThrows(BmsException.class, () -> parser.parse(specPath));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("PARSER_MISSING_ATTRIBUTE")));
+  }
+
   /** Contract: non-numeric integer attributes must produce invalid-attribute diagnostics. */
   @Test
   void parserRejectsInvalidFieldLength() {

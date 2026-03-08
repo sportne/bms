@@ -1,4 +1,4 @@
-package acme.telemetry.conditional.backend;
+package acme.telemetry.conditional.algorithms;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -8,12 +8,9 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.zip.CRC32;
 
-public final class ConditionalBackendFrame {
+public final class ChecksumCrc64Frame {
   public short version;
   public short payload;
-  public short modeValue;
-  public int nestedValue;
-  public short alwaysValue;
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -21,15 +18,10 @@ public final class ConditionalBackendFrame {
     writeUInt8(out, this.payload);
     {
       byte[] checksumSource = out.toByteArray();
-      validateChecksumRange(checksumSource.length, 0, 1, "crc16", "0..1");
-      int checksumValue = crc16(checksumSource, 0, 1);
-      writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);
+      validateChecksumRange(checksumSource.length, 0, 1, "crc64", "0..1");
+      long checksumValue = crc64(checksumSource, 0, 1);
+      writeUInt64(out, checksumValue, ByteOrder.BIG_ENDIAN);
     }
-    if (((this.version & 0xFFL) == 1L)) {
-    writeUInt8(out, this.modeValue);
-    writeUInt16(out, this.nestedValue, ByteOrder.BIG_ENDIAN);
-    }
-    writeUInt8(out, this.alwaysValue);
     return out.toByteArray();
   }
 
@@ -37,9 +29,9 @@ public final class ConditionalBackendFrame {
    * Decodes a message instance from a byte array.
    *
    * @param bytes encoded message bytes
-   * @return decoded ConditionalBackendFrame value
+   * @return decoded ChecksumCrc64Frame value
    */
-  public static ConditionalBackendFrame decode(byte[] bytes) {
+  public static ChecksumCrc64Frame decode(byte[] bytes) {
     Objects.requireNonNull(bytes, "bytes");
     return decode(ByteBuffer.wrap(bytes));
   }
@@ -48,27 +40,22 @@ public final class ConditionalBackendFrame {
    * Decodes a message instance from a byte buffer.
    *
    * @param input buffer positioned at the start of this message
-   * @return decoded ConditionalBackendFrame value
+   * @return decoded ChecksumCrc64Frame value
    */
-  public static ConditionalBackendFrame decode(ByteBuffer input) {
+  public static ChecksumCrc64Frame decode(ByteBuffer input) {
     Objects.requireNonNull(input, "input");
     int messageStartPosition = input.position();
-    ConditionalBackendFrame value = new ConditionalBackendFrame();
+    ChecksumCrc64Frame value = new ChecksumCrc64Frame();
     value.version = readUInt8(input);
     value.payload = readUInt8(input);
     {
-      validateChecksumRange(input.limit() - messageStartPosition, 0, 1, "crc16", "0..1");
-      int expectedChecksum = readUInt16(input, ByteOrder.BIG_ENDIAN);
-      int actualChecksum = crc16(input, messageStartPosition, 0, 1);
-      if (expectedChecksum != actualChecksum) {
-        throw new IllegalArgumentException("Checksum mismatch for crc16 range 0..1. Expected " + expectedChecksum + ", computed " + actualChecksum + '.');
+      validateChecksumRange(input.limit() - messageStartPosition, 0, 1, "crc64", "0..1");
+      long expectedChecksum = readUInt64(input, ByteOrder.BIG_ENDIAN);
+      long actualChecksum = crc64(input, messageStartPosition, 0, 1);
+      if (Long.compareUnsigned(expectedChecksum, actualChecksum) != 0) {
+        throw new IllegalArgumentException("Checksum mismatch for crc64 range 0..1. Expected " + Long.toUnsignedString(expectedChecksum) + ", computed " + Long.toUnsignedString(actualChecksum) + '.');
       }
     }
-    if (((value.version & 0xFFL) == 1L)) {
-    value.modeValue = readUInt8(input);
-    value.nestedValue = readUInt16(input, ByteOrder.BIG_ENDIAN);
-    }
-    value.alwaysValue = readUInt8(input);
     return value;
   }
 

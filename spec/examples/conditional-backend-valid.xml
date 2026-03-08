@@ -4,7 +4,7 @@
     <field name="version" type="uint8" comment="Protocol version"/>
     <field name="payload" type="uint8" comment="Payload selector"/>
     <checksum alg="crc16" range="0..1" comment="Checksum for first two bytes"/>
-    <if test="version == 1">
+    <if field="version" operator="eq" value="1">
       <field name="modeValue" type="uint8" comment="Conditional mode"/>
       <type name="ConditionalPayload" comment="Nested payload in conditional block">
         <field name="nestedValue" type="uint16" comment="Nested payload value"/>

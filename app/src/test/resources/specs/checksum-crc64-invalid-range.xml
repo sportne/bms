@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.algorithms">
+  <messageType name="ChecksumCrc64InvalidRange" comment="Invalid crc64 checksum range fixture">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <field name="payload" type="uint8" comment="Payload byte"/>
+    <checksum alg="crc64" range="2..1" comment="Invalid descending range"/>
+  </messageType>
+</schema>

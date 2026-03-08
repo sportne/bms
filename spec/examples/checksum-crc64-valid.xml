@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.algorithms">
+  <messageType name="ChecksumCrc64Frame" comment="Example crc64 checksum message">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <field name="payload" type="uint8" comment="Payload byte"/>
+    <checksum alg="crc64" range="0..1" comment="CRC64 over the first two bytes"/>
+  </messageType>
+</schema>

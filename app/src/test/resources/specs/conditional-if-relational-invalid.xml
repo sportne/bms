@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.relational">
+  <messageType
+      name="ConditionalRelationalInvalidFrame"
+      comment="Out-of-range literals for every new relational operator">
+    <field name="version" type="uint8" comment="Version byte"/>
+    <if field="version" operator="lt" value="300">
+      <field name="ltMode" type="uint8" comment="Out-of-range less-than literal"/>
+    </if>
+    <if field="version" operator="lte" value="300">
+      <field name="lteMode" type="uint8" comment="Out-of-range less-than-or-equal literal"/>
+    </if>
+    <if field="version" operator="gt" value="300">
+      <field name="gtMode" type="uint8" comment="Out-of-range greater-than literal"/>
+    </if>
+    <if field="version" operator="gte" value="300">
+      <field name="gteMode" type="uint8" comment="Out-of-range greater-than-or-equal literal"/>
+    </if>
+  </messageType>
+</schema>

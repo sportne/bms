@@ -31,5 +31,8 @@ This milestone builds the compiler front end in small, testable steps.
 - [x] Java/C++ generation is deterministic.
 - [x] Java generator emits deterministic code for numeric and collection backend slices.
 - [x] Java generator emits deterministic conditional code for `varString`, `pad`, `checksum`, `if`, and nested `type`.
-- [x] Java generator reports clear diagnostics for unsupported conditional combinations (for example unsupported `if@test` syntax or invalid checksum ranges).
+- [x] Java generator supports checksum algorithms `crc16`, `crc32`, `crc64`, and `sha256`.
+- [x] Java generator supports `if@test` operators `==`, `!=`, `<`, `<=`, `>`, and `>=` for numeric literals.
+- [x] Java generator reports clear diagnostics for unsupported conditional combinations (for example compound `if@test` expressions or invalid checksum ranges).
+- [x] Generated Java source is validated end-to-end by compiling generated classes and running encode/decode roundtrip tests.
 - [x] C++ generator still fails with clear diagnostics for non-foundation backend emission.
