@@ -16,14 +16,15 @@ Java or C++ that follows the binary format exactly.
 
 ## Current status
 
-Early-stage compiler / code generator project.
+Near-parity `0.1.0` release candidate.
 
 The repository contains:
 - the BMS XML Schema (XSD)
 - compiler pipeline foundation (validate → parse → semantic resolve → generate)
 - architecture and semantic-model documentation
 - task lists for incremental milestones
-- runtime end-to-end tests that compile generated Java and run encode/decode checks
+- runtime end-to-end tests that compile generated Java and C++ and run encode/decode checks
+- cross-language conformance tests that compare Java bytes and C++ bytes for the same fixture inputs
 
 ## Initial scope
 
@@ -106,6 +107,11 @@ Current C++ runtime test coverage includes:
 - generated C++ runtime roundtrip checks for those fixtures
 - checksum mismatch failure assertions
 
+Cross-language conformance coverage includes:
+- Java `encode()` bytes are compared to C++ `encode()` bytes for the full valid fixture matrix
+- C++ decode assertions run on Java-produced bytes
+- Java decode assertions run on C++-produced bytes
+
 The spec now requires `schema@namespace` and allows `messageType@namespace` override.
 
 ## Release targets
@@ -116,6 +122,7 @@ The spec now requires `schema@namespace` and allows `messageType@namespace` over
 Roadmap and execution files:
 
 - [tasks/roadmap-0.1.0-to-1.0.md](tasks/roadmap-0.1.0-to-1.0.md)
+- [tasks/roadmap-1.0.0-hardening.md](tasks/roadmap-1.0.0-hardening.md)
 - [tasks/fixture-matrix-0.1.0.md](tasks/fixture-matrix-0.1.0.md)
 - [tasks/release-0.1.0-checklist.md](tasks/release-0.1.0-checklist.md)
 

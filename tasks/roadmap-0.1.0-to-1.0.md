@@ -15,6 +15,7 @@ This roadmap turns the high-level plan into clear, testable milestones.
 ## Milestone A: C++ numeric + collection parity
 
 Goal: C++ can generate working encode/decode for numeric and collection members.
+Status: complete
 
 Scope:
 
@@ -31,6 +32,7 @@ Acceptance gate:
 ## Milestone B: C++ conditional parity
 
 Goal: C++ matches Java behavior for conditional members.
+Status: complete
 
 Scope:
 
@@ -47,6 +49,7 @@ Acceptance gate:
 ## Milestone C: runtime conformance harness
 
 Goal: prove Java and C++ behave the same for shared fixtures.
+Status: complete (local and test-suite verified)
 
 Scope:
 
@@ -62,6 +65,7 @@ Acceptance gate:
 ## Milestone D: 0.1.0 release hardening
 
 Goal: ship `0.1.0` with repeatable release steps and clear support statements.
+Status: in progress (waiting on release-commit CI and tag)
 
 Scope:
 

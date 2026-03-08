@@ -57,5 +57,22 @@ This file freezes which fixtures define parity gates for `0.1.0`.
 
 - Gate 1 (C++ numeric/collection parity): foundation + numeric + collections fixtures
 - Gate 2 (C++ conditional parity): conditional + checksum fixtures
-- Gate 3 (cross-language conformance): full mixed coverage fixtures
+- Gate 3 (cross-language conformance): all valid fixtures in this matrix
 - Gate 4 (`0.1.0` release): all sections above must stay green in CI
+
+## Verification status
+
+- Gate 3 is implemented in `CrossLanguageConformanceTest`.
+- Conformance currently runs for these valid fixtures:
+  - `valid-foundation.xml`
+  - `numeric-slice-valid.xml`
+  - `collections-slice-valid.xml`
+  - `varstring-pad-slice-valid.xml`
+  - `conditional-backend-valid.xml`
+  - `conditional-if-relational-valid.xml`
+  - `checksum-crc16-valid.xml`
+  - `checksum-crc32-valid.xml`
+  - `checksum-crc64-valid.xml`
+  - `checksum-sha256-valid.xml`
+  - `java-e2e-all-supported-valid.xml`
+  - `java-generator-coverage-valid.xml`

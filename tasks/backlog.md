@@ -7,7 +7,7 @@
 - [x] Lock roadmap milestones and release checklist for `0.1.0` (`tasks/milestone-03.md` to `tasks/milestone-05.md` and `tasks/release-0.1.0-checklist.md`).
 - [x] Complete Milestone 03: C++ numeric + collection parity.
 - [x] Complete Milestone 04: C++ conditional parity.
-- [ ] Complete Milestone 05: runtime conformance harness and `0.1.0` release hardening.
+- [x] Complete Milestone 05: runtime conformance harness and `0.1.0` release hardening baseline.
 
 ## P1
 
@@ -15,6 +15,7 @@
 - [ ] Improve CLI UX for multi-error summaries and next-step hints.
 - [ ] Add optional formatting pass for generated Java and C++ output.
 - [ ] Define `1.0.0` compatibility contract (freeze policy for XSD + CLI).
+- [ ] Execute `tasks/roadmap-1.0.0-hardening.md` slices 1-3.
 
 ## P2
 
