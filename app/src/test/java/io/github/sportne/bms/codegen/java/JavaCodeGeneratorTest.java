@@ -110,6 +110,28 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("ArrayList<Short> itemPathDataList = new ArrayList<>();"));
   }
 
+  /** Contract: staged conditional fixture generates deterministic varString and pad output. */
+  @Test
+  void javaGeneratorProducesDeterministicStagedConditionalOutput() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/varstring-pad-slice-valid.xml");
+
+    generator.generate(schema, tempDir);
+    generator.generate(schema, tempDir);
+
+    Path outputPath = tempDir.resolve("acme/telemetry/conditional/ConditionalFrame.java");
+    String expected =
+        TestSupport.readResource("golden/java/acme/telemetry/conditional/ConditionalFrame.java");
+    String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertEquals(expected, actual);
+    assertTrue(actual.contains("public String inlineName;"));
+    assertTrue(actual.contains("getBytes(StandardCharsets.UTF_8)"));
+    assertTrue(actual.contains("inlineName byte length must match count field nameLength"));
+    assertTrue(actual.contains("toString(StandardCharsets.US_ASCII)"));
+    assertTrue(actual.contains("for (int padIndex = 0; padIndex < 2; padIndex++)"));
+  }
+
   /** Contract: the coverage fixture drives extended float/scaled/collection Java branches. */
   @Test
   void javaGeneratorCoversExtendedNumericAndCollectionBranches() throws Exception {
@@ -292,10 +314,6 @@ class JavaCodeGeneratorTest {
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
-    assertTrue(
-        exception.diagnostics().stream()
-            .anyMatch(
-                diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF")));
   }
 
   /** Contract: generator emits encode/decode code paths for every primitive integer type. */

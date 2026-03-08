@@ -29,5 +29,7 @@ This milestone builds the compiler front end in small, testable steps.
 - [x] `bms validate` succeeds for conditional-slice specs (`varString`, `pad`, `checksum`, `if`, nested `type`).
 - [x] Message member declaration order is preserved exactly in parsed and resolved models.
 - [x] Java/C++ generation is deterministic.
-- [x] Java/C++ generators fail with clear diagnostics for unsupported numeric and collection backend emission.
-- [x] Java/C++ generators fail with clear diagnostics for unsupported conditional/nested backend emission.
+- [x] Java generator emits deterministic code for numeric and collection backend slices.
+- [x] Java generator emits staged conditional support for `varString` and `pad`.
+- [x] Java generator fails with clear diagnostics for deferred conditional members (`checksum`, `if`, nested `type`).
+- [x] C++ generator still fails with clear diagnostics for non-foundation backend emission.

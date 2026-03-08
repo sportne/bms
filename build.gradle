@@ -3,6 +3,8 @@ plugins {
 	id 'com.diffplug.spotless' version '7.0.2'
 }
 
+def localScratchOutputDir = layout.projectDirectory.dir('.tmp')
+
 allprojects {
 	group = 'io.github.sportne'
 	version = '0.1.0-SNAPSHOT'
@@ -27,4 +29,8 @@ spotless {
 
 check {
 	dependsOn spotlessCheck
+}
+
+tasks.named('clean') {
+	delete(localScratchOutputDir)
 }

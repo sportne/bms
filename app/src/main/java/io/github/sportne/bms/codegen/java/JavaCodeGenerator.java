@@ -4,6 +4,7 @@ import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
@@ -18,12 +19,15 @@ import io.github.sportne.bms.model.resolved.ResolvedBitSegment;
 import io.github.sportne.bms.model.resolved.ResolvedBitVariant;
 import io.github.sportne.bms.model.resolved.ResolvedBlobArray;
 import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
+import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
+import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
@@ -31,6 +35,7 @@ import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedVarString;
 import io.github.sportne.bms.model.resolved.ResolvedVector;
 import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
 import io.github.sportne.bms.model.resolved.VarStringTypeRef;
@@ -57,8 +62,8 @@ import java.util.TreeSet;
  * Generates Java source files from the resolved model.
  *
  * <p>Each message type becomes one Java class with deterministic field declarations plus
- * encode/decode logic. This generator currently supports foundation, numeric, and collection
- * members.
+ * encode/decode logic. This generator currently supports foundation, numeric, collection, and
+ * staged conditional members ({@code varString} and {@code pad}).
  */
 public final class JavaCodeGenerator {
   private static final String SHARED_IO_HELPERS =
@@ -412,7 +417,8 @@ public final class JavaCodeGenerator {
         mapArrays(schema.reusableArrays()),
         mapVectors(schema.reusableVectors()),
         mapBlobArrays(schema.reusableBlobArrays()),
-        mapBlobVectors(schema.reusableBlobVectors()));
+        mapBlobVectors(schema.reusableBlobVectors()),
+        mapVarStrings(schema.reusableVarStrings()));
   }
 
   /**
@@ -518,6 +524,21 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Builds a stable reusable-varString lookup map.
+   *
+   * @param reusableVarStrings reusable varString definitions
+   * @return immutable varString lookup map
+   */
+  private static Map<String, ResolvedVarString> mapVarStrings(
+      List<ResolvedVarString> reusableVarStrings) {
+    Map<String, ResolvedVarString> reusableVarStringByName = new LinkedHashMap<>();
+    for (ResolvedVarString resolvedVarString : reusableVarStrings) {
+      reusableVarStringByName.put(resolvedVarString.name(), resolvedVarString);
+    }
+    return Map.copyOf(reusableVarStringByName);
+  }
+
+  /**
    * Verifies that this generator supports every member and type used by the message.
    *
    * @param messageType message being generated
@@ -617,6 +638,42 @@ public final class JavaCodeGenerator {
     if (member instanceof ResolvedBlobVector resolvedBlobVector) {
       checkBlobVectorSupport(
           resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      checkVarStringSupport(
+          resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedPad) {
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "checksum "
+                  + resolvedChecksum.algorithm()
+                  + "(range=\""
+                  + resolvedChecksum.range()
+                  + "\")",
+              outputPath.toString()));
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "if(test=\"" + resolvedIfBlock.test() + "\")",
+              outputPath.toString()));
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedMessageType) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "nested type " + resolvedNestedMessageType.name(),
+              outputPath.toString()));
       return;
     }
 
@@ -721,6 +778,48 @@ public final class JavaCodeGenerator {
       return;
     }
 
+    if (typeRef instanceof BlobArrayTypeRef
+        || typeRef instanceof BlobVectorTypeRef
+        || typeRef instanceof VarStringTypeRef) {
+      checkBlobOrVarStringTypeSupport(
+          resolvedField,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          typeRef,
+          outputPath,
+          diagnostics);
+      return;
+    }
+
+    diagnostics.add(
+        unsupportedTypeRefDiagnostic(
+            messageType.name(),
+            resolvedField.name(),
+            typeRef.getClass().getSimpleName(),
+            outputPath.toString(),
+            "This type reference is not implemented in the Java backend yet."));
+  }
+
+  /**
+   * Checks support for blob and varString field type references.
+   *
+   * @param resolvedField field to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param typeRef resolved type reference being checked
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkBlobOrVarStringTypeSupport(
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      ResolvedTypeRef typeRef,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
     if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
       if (!generationContext
           .reusableBlobArrayByName()
@@ -754,13 +853,21 @@ public final class JavaCodeGenerator {
       return;
     }
 
-    diagnostics.add(
-        unsupportedTypeRefDiagnostic(
-            messageType.name(),
-            resolvedField.name(),
-            typeRef.getClass().getSimpleName(),
-            outputPath.toString(),
-            "This type reference is not implemented in the Java backend yet."));
+    VarStringTypeRef varStringTypeRef = (VarStringTypeRef) typeRef;
+    ResolvedVarString resolvedVarString =
+        generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+    if (resolvedVarString == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath.toString(),
+              "Reusable varString was not found: " + varStringTypeRef.varStringTypeName()));
+      return;
+    }
+    checkVarStringSupport(
+        resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
   }
 
   /**
@@ -903,6 +1010,96 @@ public final class JavaCodeGenerator {
         outputPath,
         diagnostics,
         "blobVector " + resolvedBlobVector.name());
+  }
+
+  /**
+   * Checks support for one varString definition.
+   *
+   * @param resolvedVarString varString definition to validate
+   * @param messageType parent message type
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkVarStringSupport(
+      ResolvedVarString resolvedVarString,
+      ResolvedMessageType messageType,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      if (!primitiveFieldByName.containsKey(resolvedCountFieldLength.ref())) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                "varString "
+                    + resolvedVarString.name()
+                    + "(countField ref=\""
+                    + resolvedCountFieldLength.ref()
+                    + "\")",
+                outputPath.toString()));
+      }
+      return;
+    }
+
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
+      validateVarStringTerminatorLiteral(
+          resolvedVarString,
+          resolvedTerminatorValueLength.value(),
+          messageType,
+          outputPath,
+          diagnostics);
+      return;
+    }
+
+    diagnostics.add(
+        unsupportedMemberDiagnostic(
+            messageType.name(),
+            "varString " + resolvedVarString.name() + "(terminatorField path)",
+            outputPath.toString()));
+  }
+
+  /**
+   * Checks that one varString terminator literal is supported.
+   *
+   * @param resolvedVarString varString definition to validate
+   * @param literal terminator literal text
+   * @param messageType parent message type
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void validateVarStringTerminatorLiteral(
+      ResolvedVarString resolvedVarString,
+      String literal,
+      ResolvedMessageType messageType,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    try {
+      BigInteger numericLiteral = parseNumericLiteral(literal);
+      if (!fitsPrimitiveRange(numericLiteral, PrimitiveType.UINT8)) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                "varString "
+                    + resolvedVarString.name()
+                    + "(terminator literal out of range: "
+                    + literal
+                    + ")",
+                outputPath.toString()));
+      }
+    } catch (NumberFormatException exception) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "varString "
+                  + resolvedVarString.name()
+                  + "(invalid terminator literal: "
+                  + literal
+                  + ")",
+              outputPath.toString()));
+    }
   }
 
   /**
@@ -1125,6 +1322,7 @@ public final class JavaCodeGenerator {
     imports.add("java.io.ByteArrayOutputStream");
     imports.add("java.nio.ByteBuffer");
     imports.add("java.nio.ByteOrder");
+    imports.add("java.nio.charset.StandardCharsets");
     imports.add("java.util.ArrayList");
     imports.add("java.util.Objects");
 
@@ -1220,6 +1418,9 @@ public final class JavaCodeGenerator {
   private static void appendMemberDeclarations(
       StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
     for (ResolvedMessageMember member : messageType.members()) {
+      if (member instanceof ResolvedPad) {
+        continue;
+      }
       builder
           .append("  public ")
           .append(javaTypeForMember(member, generationContext))
@@ -1257,6 +1458,9 @@ public final class JavaCodeGenerator {
     }
     if (member instanceof ResolvedBlobArray || member instanceof ResolvedBlobVector) {
       return "byte[]";
+    }
+    if (member instanceof ResolvedVarString) {
+      return "String";
     }
     throw new IllegalStateException(
         "Unsupported member type: " + member.getClass().getSimpleName());
@@ -1304,7 +1508,7 @@ public final class JavaCodeGenerator {
       return "byte[]";
     }
     if (typeRef instanceof VarStringTypeRef) {
-      throw new IllegalStateException("varString type refs are deferred in this milestone.");
+      return "String";
     }
     throw new IllegalStateException(
         "Unsupported type reference: " + typeRef.getClass().getSimpleName());
@@ -1364,6 +1568,9 @@ public final class JavaCodeGenerator {
     }
     if (member instanceof ResolvedBlobVector resolvedBlobVector) {
       return resolvedBlobVector.name();
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      return resolvedVarString.name();
     }
     throw new IllegalStateException(
         "Unsupported member type: " + member.getClass().getSimpleName());
@@ -1718,13 +1925,33 @@ public final class JavaCodeGenerator {
           builder, "this." + resolvedBlobArray.name(), resolvedBlobArray, resolvedBlobArray.name());
       return;
     }
-    appendEncodeBlobVector(
-        builder,
-        "this." + ((ResolvedBlobVector) member).name(),
-        (ResolvedBlobVector) member,
-        ((ResolvedBlobVector) member).name(),
-        primitiveFieldByName,
-        "this.");
+    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
+      appendEncodeBlobVector(
+          builder,
+          "this." + resolvedBlobVector.name(),
+          resolvedBlobVector,
+          resolvedBlobVector.name(),
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      appendEncodeVarString(
+          builder,
+          "this." + resolvedVarString.name(),
+          resolvedVarString,
+          resolvedVarString.name(),
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
+    if (member instanceof ResolvedPad resolvedPad) {
+      appendEncodePad(builder, resolvedPad);
+      return;
+    }
+
+    throw new IllegalStateException(
+        "Unsupported member type: " + member.getClass().getSimpleName());
   }
 
   /**
@@ -1793,18 +2020,33 @@ public final class JavaCodeGenerator {
       appendEncodeBlobArray(builder, fieldExpression, resolvedBlobArray, resolvedField.name());
       return;
     }
+    if (typeRef instanceof BlobVectorTypeRef blobVectorTypeRef) {
+      ResolvedBlobVector resolvedBlobVector =
+          generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName());
+      appendEncodeBlobVector(
+          builder,
+          fieldExpression,
+          resolvedBlobVector,
+          resolvedField.name(),
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
+    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
+      ResolvedVarString resolvedVarString =
+          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+      appendEncodeVarString(
+          builder,
+          fieldExpression,
+          resolvedVarString,
+          resolvedField.name(),
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
 
-    ResolvedBlobVector resolvedBlobVector =
-        generationContext
-            .reusableBlobVectorByName()
-            .get(((BlobVectorTypeRef) typeRef).blobVectorTypeName());
-    appendEncodeBlobVector(
-        builder,
-        fieldExpression,
-        resolvedBlobVector,
-        resolvedField.name(),
-        primitiveFieldByName,
-        "this.");
+    throw new IllegalStateException(
+        "Unsupported type reference: " + typeRef.getClass().getSimpleName());
   }
 
   /**
@@ -2428,6 +2670,126 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Appends varString encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the string value
+   * @param resolvedVarString varString definition
+   * @param fieldName field/member name for exception text
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendEncodeVarString(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedVarString resolvedVarString,
+      String fieldName,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    String encodedLocalName = "encoded" + toPascalCase(fieldName);
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n")
+        .append("    byte[] ")
+        .append(encodedLocalName)
+        .append(" = ")
+        .append(valueExpression)
+        .append(".getBytes(")
+        .append(charsetExpression(resolvedVarString.encoding()))
+        .append(");\n");
+
+    appendVarStringCountValidation(
+        builder,
+        resolvedVarString.lengthMode(),
+        encodedLocalName,
+        primitiveFieldByName,
+        ownerPrefix,
+        fieldName);
+
+    builder
+        .append("    out.write(")
+        .append(encodedLocalName)
+        .append(", 0, ")
+        .append(encodedLocalName)
+        .append(".length);\n");
+
+    String terminatorLiteral = terminatorLiteral(resolvedVarString.lengthMode());
+    if (terminatorLiteral != null) {
+      BigInteger numericLiteral = parseNumericLiteral(terminatorLiteral);
+      builder.append("    writeUInt8(out, (short) ").append(numericLiteral).append(");\n");
+    }
+  }
+
+  /**
+   * Appends count-field validation for varString encoders.
+   *
+   * @param builder destination source builder
+   * @param lengthMode varString length mode
+   * @param encodedBytesExpression expression that resolves to encoded bytes
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   * @param fieldName field/member name for exception text
+   */
+  private static void appendVarStringCountValidation(
+      StringBuilder builder,
+      ResolvedLengthMode lengthMode,
+      String encodedBytesExpression,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      String fieldName) {
+    if (!(lengthMode instanceof ResolvedCountFieldLength resolvedCountFieldLength)) {
+      return;
+    }
+
+    PrimitiveType countFieldType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+    String countExpression =
+        countExpression(ownerPrefix + resolvedCountFieldLength.ref(), countFieldType);
+    String countMethod =
+        countFieldType == PrimitiveType.UINT64 ? "requireCountUnsignedLong" : "requireCount";
+    String localName = "expected" + toPascalCase(fieldName) + "Length";
+
+    builder
+        .append("    int ")
+        .append(localName)
+        .append(" = ")
+        .append(countMethod)
+        .append('(')
+        .append(countExpression)
+        .append(", \"")
+        .append(resolvedCountFieldLength.ref())
+        .append("\");\n")
+        .append("    if (")
+        .append(encodedBytesExpression)
+        .append(".length != ")
+        .append(localName)
+        .append(") {\n")
+        .append("      throw new IllegalArgumentException(\"")
+        .append(fieldName)
+        .append(" byte length must match count field ")
+        .append(resolvedCountFieldLength.ref())
+        .append(".\");\n")
+        .append("    }\n");
+  }
+
+  /**
+   * Appends pad encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedPad pad definition
+   */
+  private static void appendEncodePad(StringBuilder builder, ResolvedPad resolvedPad) {
+    builder
+        .append("    for (int padIndex = 0; padIndex < ")
+        .append(resolvedPad.bytes())
+        .append("; padIndex++) {\n")
+        .append("      out.write(0);\n")
+        .append("    }\n");
+  }
+
+  /**
    * Resolves optional terminator literal from a length mode.
    *
    * @param lengthMode vector/blob length mode
@@ -2568,14 +2930,33 @@ public final class JavaCodeGenerator {
       appendDecodeBlobArray(builder, "value." + resolvedBlobArray.name(), resolvedBlobArray);
       return;
     }
+    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
+      appendDecodeBlobVector(
+          builder,
+          "value." + resolvedBlobVector.name(),
+          resolvedBlobVector,
+          resolvedBlobVector.name(),
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
+    if (member instanceof ResolvedVarString resolvedVarString) {
+      appendDecodeVarString(
+          builder,
+          "value." + resolvedVarString.name(),
+          resolvedVarString,
+          resolvedVarString.name(),
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
+    if (member instanceof ResolvedPad resolvedPad) {
+      appendDecodePad(builder, resolvedPad);
+      return;
+    }
 
-    appendDecodeBlobVector(
-        builder,
-        "value." + ((ResolvedBlobVector) member).name(),
-        (ResolvedBlobVector) member,
-        ((ResolvedBlobVector) member).name(),
-        primitiveFieldByName,
-        "value.");
+    throw new IllegalStateException(
+        "Unsupported member type: " + member.getClass().getSimpleName());
   }
 
   /**
@@ -2649,18 +3030,33 @@ public final class JavaCodeGenerator {
       appendDecodeBlobArray(builder, targetExpression, resolvedBlobArray);
       return;
     }
+    if (typeRef instanceof BlobVectorTypeRef blobVectorTypeRef) {
+      ResolvedBlobVector resolvedBlobVector =
+          generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName());
+      appendDecodeBlobVector(
+          builder,
+          targetExpression,
+          resolvedBlobVector,
+          resolvedField.name(),
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
+    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
+      ResolvedVarString resolvedVarString =
+          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+      appendDecodeVarString(
+          builder,
+          targetExpression,
+          resolvedVarString,
+          resolvedField.name(),
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
 
-    ResolvedBlobVector resolvedBlobVector =
-        generationContext
-            .reusableBlobVectorByName()
-            .get(((BlobVectorTypeRef) typeRef).blobVectorTypeName());
-    appendDecodeBlobVector(
-        builder,
-        targetExpression,
-        resolvedBlobVector,
-        resolvedField.name(),
-        primitiveFieldByName,
-        "value.");
+    throw new IllegalStateException(
+        "Unsupported type reference: " + typeRef.getClass().getSimpleName());
   }
 
   /**
@@ -3278,6 +3674,102 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Appends varString decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedVarString varString definition
+   * @param fieldName field/member name for local variables
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendDecodeVarString(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedVarString resolvedVarString,
+      String fieldName,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    String charsetExpression = charsetExpression(resolvedVarString.encoding());
+    if (resolvedVarString.lengthMode()
+        instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      String countLocalName = "expected" + toPascalCase(fieldName) + "Length";
+      String bytesLocalName = "bytes" + toPascalCase(fieldName);
+      PrimitiveType countFieldType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+      String countExpression =
+          countExpression(ownerPrefix + resolvedCountFieldLength.ref(), countFieldType);
+      String countMethod =
+          countFieldType == PrimitiveType.UINT64 ? "requireCountUnsignedLong" : "requireCount";
+
+      builder
+          .append("    int ")
+          .append(countLocalName)
+          .append(" = ")
+          .append(countMethod)
+          .append('(')
+          .append(countExpression)
+          .append(", \"")
+          .append(resolvedCountFieldLength.ref())
+          .append("\");\n")
+          .append("    byte[] ")
+          .append(bytesLocalName)
+          .append(" = new byte[")
+          .append(countLocalName)
+          .append("];\n")
+          .append("    input.get(")
+          .append(bytesLocalName)
+          .append(");\n")
+          .append("    ")
+          .append(targetExpression)
+          .append(" = new String(")
+          .append(bytesLocalName)
+          .append(", ")
+          .append(charsetExpression)
+          .append(");\n");
+      return;
+    }
+
+    BigInteger numericLiteral =
+        parseNumericLiteral(terminatorLiteral(resolvedVarString.lengthMode()));
+    String tempName = "bytes" + toPascalCase(fieldName) + "Buffer";
+    builder
+        .append("    ByteArrayOutputStream ")
+        .append(tempName)
+        .append(" = new ByteArrayOutputStream();\n")
+        .append("    while (true) {\n")
+        .append("      short nextByte = readUInt8(input);\n")
+        .append("      if ((nextByte & 0xFFL) == ")
+        .append(numericLiteral)
+        .append("L) {\n")
+        .append("        break;\n")
+        .append("      }\n")
+        .append("      ")
+        .append(tempName)
+        .append(".write(nextByte & 0xFF);\n")
+        .append("    }\n")
+        .append("    ")
+        .append(targetExpression)
+        .append(" = ")
+        .append(tempName)
+        .append(".toString(")
+        .append(charsetExpression)
+        .append(");\n");
+  }
+
+  /**
+   * Appends pad decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedPad pad definition
+   */
+  private static void appendDecodePad(StringBuilder builder, ResolvedPad resolvedPad) {
+    builder
+        .append("    input.position(input.position() + ")
+        .append(resolvedPad.bytes())
+        .append(");\n");
+  }
+
+  /**
    * Converts one primitive decode operation into a Java expression.
    *
    * @param primitiveType primitive type to decode
@@ -3472,6 +3964,19 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Converts one resolved string encoding to a Java {@link java.nio.charset.Charset} expression.
+   *
+   * @param encoding resolved string encoding
+   * @return Java source expression for the matching charset
+   */
+  private static String charsetExpression(StringEncoding encoding) {
+    if (encoding == StringEncoding.ASCII) {
+      return "StandardCharsets.US_ASCII";
+    }
+    return "StandardCharsets.UTF_8";
+  }
+
+  /**
    * Converts an optional decimal value to a deterministic Java double literal.
    *
    * @param decimal decimal value from the resolved model
@@ -3490,5 +3995,6 @@ public final class JavaCodeGenerator {
       Map<String, ResolvedArray> reusableArrayByName,
       Map<String, ResolvedVector> reusableVectorByName,
       Map<String, ResolvedBlobArray> reusableBlobArrayByName,
-      Map<String, ResolvedBlobVector> reusableBlobVectorByName) {}
+      Map<String, ResolvedBlobVector> reusableBlobVectorByName,
+      Map<String, ResolvedVarString> reusableVarStringByName) {}
 }

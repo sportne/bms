@@ -68,9 +68,20 @@ Current front-end parser/semantic support includes:
 - `if`
 - nested `type`
 
-Current Java/C++ backend emission is intentionally narrower:
+Current Java backend emission supports:
+- foundation scalar fields and message references
+- numeric slice (`bitField`, `float`, `scaledInt`)
+- collection slice (`array`, `vector`, `blobArray`, `blobVector`)
+- staged conditional slice (`varString`, `pad`)
+
+Current Java backend still defers:
+- `checksum`
+- `if`
+- nested `type`
+
+Current C++ backend emission is intentionally narrower:
 - foundation scalar fields and message references are generated
-- unsupported member kinds fail with clear diagnostics during `generate`
+- non-foundation member kinds fail with clear diagnostics during `generate`
 
 The spec now requires `schema@namespace` and allows `messageType@namespace` override.
 
@@ -88,7 +99,7 @@ The spec now requires `schema@namespace` and allows `messageType@namespace` over
 1. Validate a spec:
    `./gradlew :app:run --args='validate spec/examples/foundation-valid.xml'`
 2. Generate Java and C++ code:
-   `./gradlew :app:run --args='generate spec/examples/foundation-valid.xml --java /tmp/out-java --cpp /tmp/out-cpp'`
+   `./gradlew :app:run --args='generate spec/examples/foundation-valid.xml --java .tmp/out-java --cpp .tmp/out-cpp'`
 3. Run checks and tests:
    `./gradlew check`
 

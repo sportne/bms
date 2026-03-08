@@ -108,6 +108,26 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` succeeds for staged conditional fixture (`varString` + `pad`). */
+  void validateCommandReturnsSuccessForStagedConditionalSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate", TestSupport.resourcePath("specs/varstring-pad-slice-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
     BmsCli cli = new BmsCli();
@@ -178,7 +198,7 @@ class BmsCliTest {
   }
 
   @Test
-  /** Contract: generation fails clearly for unsupported milestone-03 members and type refs. */
+  /** Contract: generation fails clearly for deferred milestone-03 members. */
   void generateCommandReturnsSpecErrorForUnsupportedMilestoneThreeMembers() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -202,10 +222,32 @@ class BmsCliTest {
         stderrBuffer
             .toString(StandardCharsets.UTF_8)
             .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  @Test
+  /** Contract: Java generation succeeds for staged conditional members (`varString` and `pad`). */
+  void generateCommandReturnsSuccessForStagedConditionalSliceSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-conditional-staged");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/varstring-pad-slice-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
     assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF"));
+        Files.exists(javaOutputDir.resolve("acme/telemetry/conditional/ConditionalFrame.java")));
   }
 
   @Test

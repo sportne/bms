@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional">
+  <varString name="ReusableLabel" encoding="ascii" comment="Reusable label text">
+    <countField ref="reusableLength"/>
+  </varString>
+
+  <messageType name="ConditionalFrame" comment="Staged Java backend varString and pad support">
+    <field name="nameLength" type="uint8" comment="Length of inlineName in bytes"/>
+    <field name="reusableLength" type="uint16" comment="Length of reusableLabel in bytes"/>
+    <varString name="inlineName" encoding="utf8" comment="Inline counted string">
+      <countField ref="nameLength"/>
+    </varString>
+    <varString name="inlineTag" encoding="ascii" comment="Inline terminated string">
+      <terminatorValue value="0x00"/>
+    </varString>
+    <field name="reusableLabel" type="ReusableLabel" comment="Reusable counted string"/>
+    <pad bytes="2" comment="Reserved bytes"/>
+  </messageType>
+</schema>

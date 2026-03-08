@@ -1,6 +1,5 @@
-package acme.telemetry.packet;
+package acme.telemetry.conditional;
 
-import acme.telemetry.Header;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -8,16 +7,38 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Objects;
 
-public final class Packet {
-  public Header header;
-  public long payloadLength;
+public final class ConditionalFrame {
+  public short nameLength;
+  public int reusableLength;
+  public String inlineName;
+  public String inlineTag;
+  public String reusableLabel;
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
-    Objects.requireNonNull(this.header, "header");
-    byte[] encodedHeader = this.header.encode();
-    out.write(encodedHeader, 0, encodedHeader.length);
-    writeUInt32(out, this.payloadLength, ByteOrder.BIG_ENDIAN);
+    writeUInt8(out, this.nameLength);
+    writeUInt16(out, this.reusableLength, ByteOrder.BIG_ENDIAN);
+    Objects.requireNonNull(this.inlineName, "inlineName");
+    byte[] encodedInlineName = this.inlineName.getBytes(StandardCharsets.UTF_8);
+    int expectedInlineNameLength = requireCount((this.nameLength & 0xFFL), "nameLength");
+    if (encodedInlineName.length != expectedInlineNameLength) {
+      throw new IllegalArgumentException("inlineName byte length must match count field nameLength.");
+    }
+    out.write(encodedInlineName, 0, encodedInlineName.length);
+    Objects.requireNonNull(this.inlineTag, "inlineTag");
+    byte[] encodedInlineTag = this.inlineTag.getBytes(StandardCharsets.US_ASCII);
+    out.write(encodedInlineTag, 0, encodedInlineTag.length);
+    writeUInt8(out, (short) 0);
+    Objects.requireNonNull(this.reusableLabel, "reusableLabel");
+    byte[] encodedReusableLabel = this.reusableLabel.getBytes(StandardCharsets.US_ASCII);
+    int expectedReusableLabelLength = requireCount((this.reusableLength & 0xFFFFL), "reusableLength");
+    if (encodedReusableLabel.length != expectedReusableLabelLength) {
+      throw new IllegalArgumentException("reusableLabel byte length must match count field reusableLength.");
+    }
+    out.write(encodedReusableLabel, 0, encodedReusableLabel.length);
+    for (int padIndex = 0; padIndex < 2; padIndex++) {
+      out.write(0);
+    }
     return out.toByteArray();
   }
 
@@ -25,9 +46,9 @@ public final class Packet {
    * Decodes a message instance from a byte array.
    *
    * @param bytes encoded message bytes
-   * @return decoded Packet value
+   * @return decoded ConditionalFrame value
    */
-  public static Packet decode(byte[] bytes) {
+  public static ConditionalFrame decode(byte[] bytes) {
     Objects.requireNonNull(bytes, "bytes");
     return decode(ByteBuffer.wrap(bytes));
   }
@@ -36,13 +57,31 @@ public final class Packet {
    * Decodes a message instance from a byte buffer.
    *
    * @param input buffer positioned at the start of this message
-   * @return decoded Packet value
+   * @return decoded ConditionalFrame value
    */
-  public static Packet decode(ByteBuffer input) {
+  public static ConditionalFrame decode(ByteBuffer input) {
     Objects.requireNonNull(input, "input");
-    Packet value = new Packet();
-    value.header = Header.decode(input);
-    value.payloadLength = readUInt32(input, ByteOrder.BIG_ENDIAN);
+    ConditionalFrame value = new ConditionalFrame();
+    value.nameLength = readUInt8(input);
+    value.reusableLength = readUInt16(input, ByteOrder.BIG_ENDIAN);
+    int expectedInlineNameLength = requireCount((value.nameLength & 0xFFL), "nameLength");
+    byte[] bytesInlineName = new byte[expectedInlineNameLength];
+    input.get(bytesInlineName);
+    value.inlineName = new String(bytesInlineName, StandardCharsets.UTF_8);
+    ByteArrayOutputStream bytesInlineTagBuffer = new ByteArrayOutputStream();
+    while (true) {
+      short nextByte = readUInt8(input);
+      if ((nextByte & 0xFFL) == 0L) {
+        break;
+      }
+      bytesInlineTagBuffer.write(nextByte & 0xFF);
+    }
+    value.inlineTag = bytesInlineTagBuffer.toString(StandardCharsets.US_ASCII);
+    int expectedReusableLabelLength = requireCount((value.reusableLength & 0xFFFFL), "reusableLength");
+    byte[] bytesReusableLabel = new byte[expectedReusableLabelLength];
+    input.get(bytesReusableLabel);
+    value.reusableLabel = new String(bytesReusableLabel, StandardCharsets.US_ASCII);
+    input.position(input.position() + 2);
     return value;
   }
 
