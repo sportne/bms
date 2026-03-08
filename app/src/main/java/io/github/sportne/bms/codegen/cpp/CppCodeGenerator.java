@@ -1,5 +1,11 @@
 package io.github.sportne.bms.codegen.cpp;
 
+import io.github.sportne.bms.codegen.common.ChecksumRangeRules;
+import io.github.sportne.bms.codegen.common.LengthModeRules;
+import io.github.sportne.bms.codegen.common.MemberTraversal;
+import io.github.sportne.bms.codegen.common.PrimitiveFieldIndex;
+import io.github.sportne.bms.codegen.common.PrimitiveNumericRules;
+import io.github.sportne.bms.codegen.common.SchemaIndex;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
@@ -35,8 +41,6 @@ import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
-import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
-import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedVarString;
@@ -54,7 +58,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -493,15 +496,7 @@ public final class CppCodeGenerator {
    * @return immutable generation context
    */
   private static GenerationContext buildContext(ResolvedSchema schema) {
-    return new GenerationContext(
-        indexMessageTypes(schema),
-        mapFloats(schema.reusableFloats()),
-        mapScaledInts(schema.reusableScaledInts()),
-        mapArrays(schema.reusableArrays()),
-        mapVectors(schema.reusableVectors()),
-        mapBlobArrays(schema.reusableBlobArrays()),
-        mapBlobVectors(schema.reusableBlobVectors()),
-        mapVarStrings(schema.reusableVarStrings()));
+    return GenerationContext.fromSchemaIndex(SchemaIndex.fromResolvedSchema(schema));
   }
 
   /**
@@ -546,33 +541,7 @@ public final class CppCodeGenerator {
    * @return immutable primitive field lookup map
    */
   private static Map<String, PrimitiveType> primitiveFieldsByName(ResolvedMessageType messageType) {
-    Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
-    collectPrimitiveFields(primitiveFieldByName, messageType.members());
-    return Map.copyOf(primitiveFieldByName);
-  }
-
-  /**
-   * Collects primitive scalar field types from one member list recursively.
-   *
-   * @param primitiveFieldByName destination primitive-field lookup map
-   * @param members members to inspect
-   */
-  private static void collectPrimitiveFields(
-      Map<String, PrimitiveType> primitiveFieldByName, List<ResolvedMessageMember> members) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedField resolvedField
-          && resolvedField.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
-        primitiveFieldByName.putIfAbsent(resolvedField.name(), primitiveTypeRef.primitiveType());
-        continue;
-      }
-      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-        collectPrimitiveFields(primitiveFieldByName, resolvedIfBlock.members());
-        continue;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType) {
-        collectPrimitiveFields(primitiveFieldByName, resolvedNestedType.members());
-      }
-    }
+    return PrimitiveFieldIndex.collect(messageType);
   }
 
   /**
@@ -693,120 +662,50 @@ public final class CppCodeGenerator {
     if (typeRef instanceof PrimitiveTypeRef || typeRef instanceof MessageTypeRef) {
       return;
     }
-    if (typeRef instanceof FloatTypeRef floatTypeRef) {
-      ResolvedFloat resolvedFloat =
-          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
-      if (resolvedFloat == null) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable float was not found: " + floatTypeRef.floatTypeName()));
-        return;
-      }
-      checkFloatSupport(resolvedFloat, messageType, outputPath, diagnostics);
+    if (checkFloatTypeRefSupport(
+        typeRef, resolvedField, messageType, generationContext, outputPath, diagnostics)) {
       return;
     }
-    if (typeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
-      if (!generationContext
-          .reusableScaledIntByName()
-          .containsKey(scaledIntTypeRef.scaledIntTypeName())) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable scaledInt was not found: " + scaledIntTypeRef.scaledIntTypeName()));
-      }
+    if (checkScaledIntTypeRefSupport(
+        typeRef, resolvedField, messageType, generationContext, outputPath, diagnostics)) {
       return;
     }
-    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
-      ResolvedArray resolvedArray =
-          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
-      if (resolvedArray == null) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable array was not found: " + arrayTypeRef.arrayTypeName()));
-        return;
-      }
-      checkArraySupport(resolvedArray, messageType, generationContext, outputPath, diagnostics);
+    if (checkArrayTypeRefSupport(
+        typeRef, resolvedField, messageType, generationContext, outputPath, diagnostics)) {
       return;
     }
-    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
-      ResolvedVector resolvedVector =
-          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
-      if (resolvedVector == null) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable vector was not found: " + vectorTypeRef.vectorTypeName()));
-        return;
-      }
-      checkVectorSupport(
-          resolvedVector,
-          messageType,
-          generationContext,
-          primitiveFieldByName,
-          outputPath,
-          diagnostics);
+    if (checkVectorTypeRefSupport(
+        typeRef,
+        resolvedField,
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics)) {
       return;
     }
-    if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
-      if (!generationContext
-          .reusableBlobArrayByName()
-          .containsKey(blobArrayTypeRef.blobArrayTypeName())) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable blobArray was not found: " + blobArrayTypeRef.blobArrayTypeName()));
-      }
+    if (checkBlobArrayTypeRefSupport(
+        typeRef, resolvedField, messageType, generationContext, outputPath, diagnostics)) {
       return;
     }
-    if (typeRef instanceof BlobVectorTypeRef blobVectorTypeRef) {
-      ResolvedBlobVector resolvedBlobVector =
-          generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName());
-      if (resolvedBlobVector == null) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable blobVector was not found: " + blobVectorTypeRef.blobVectorTypeName()));
-      } else {
-        checkBlobVectorSupport(
-            resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
-      }
+    if (checkBlobVectorTypeRefSupport(
+        typeRef,
+        resolvedField,
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics)) {
       return;
     }
-    if (typeRef instanceof VarStringTypeRef varStringTypeRef) {
-      ResolvedVarString resolvedVarString =
-          generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
-      if (resolvedVarString == null) {
-        diagnostics.add(
-            unsupportedTypeRefDiagnostic(
-                messageType.name(),
-                resolvedField.name(),
-                typeRef.getClass().getSimpleName(),
-                outputPath,
-                "Reusable varString was not found: " + varStringTypeRef.varStringTypeName()));
-      } else {
-        checkVarStringSupport(
-            resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
-      }
+    if (checkVarStringTypeRefSupport(
+        typeRef,
+        resolvedField,
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics)) {
       return;
     }
 
@@ -817,6 +716,275 @@ public final class CppCodeGenerator {
             typeRef.getClass().getSimpleName(),
             outputPath,
             "This type reference is not implemented in the C++ backend yet."));
+  }
+
+  /**
+   * Checks support for one reusable float reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkFloatTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof FloatTypeRef floatTypeRef)) {
+      return false;
+    }
+    ResolvedFloat resolvedFloat =
+        generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+    if (resolvedFloat == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable float was not found: " + floatTypeRef.floatTypeName()));
+      return true;
+    }
+    checkFloatSupport(resolvedFloat, messageType, outputPath, diagnostics);
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable scaled-int reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkScaledIntTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof ScaledIntTypeRef scaledIntTypeRef)) {
+      return false;
+    }
+    if (!generationContext
+        .reusableScaledIntByName()
+        .containsKey(scaledIntTypeRef.scaledIntTypeName())) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable scaledInt was not found: " + scaledIntTypeRef.scaledIntTypeName()));
+    }
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable array reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkArrayTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof ArrayTypeRef arrayTypeRef)) {
+      return false;
+    }
+    ResolvedArray resolvedArray =
+        generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+    if (resolvedArray == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable array was not found: " + arrayTypeRef.arrayTypeName()));
+      return true;
+    }
+    checkArraySupport(resolvedArray, messageType, generationContext, outputPath, diagnostics);
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable vector reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkVectorTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof VectorTypeRef vectorTypeRef)) {
+      return false;
+    }
+    ResolvedVector resolvedVector =
+        generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+    if (resolvedVector == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable vector was not found: " + vectorTypeRef.vectorTypeName()));
+      return true;
+    }
+    checkVectorSupport(
+        resolvedVector,
+        messageType,
+        generationContext,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics);
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable blob-array reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkBlobArrayTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof BlobArrayTypeRef blobArrayTypeRef)) {
+      return false;
+    }
+    if (!generationContext
+        .reusableBlobArrayByName()
+        .containsKey(blobArrayTypeRef.blobArrayTypeName())) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable blobArray was not found: " + blobArrayTypeRef.blobArrayTypeName()));
+    }
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable blob-vector reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkBlobVectorTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof BlobVectorTypeRef blobVectorTypeRef)) {
+      return false;
+    }
+    ResolvedBlobVector resolvedBlobVector =
+        generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName());
+    if (resolvedBlobVector == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable blobVector was not found: " + blobVectorTypeRef.blobVectorTypeName()));
+      return true;
+    }
+    checkBlobVectorSupport(
+        resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+    return true;
+  }
+
+  /**
+   * Checks support for one reusable varString reference.
+   *
+   * @param typeRef field type reference
+   * @param resolvedField field that owns the type reference
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path shown in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return {@code true} when this helper handled the type reference
+   */
+  private static boolean checkVarStringTypeRefSupport(
+      ResolvedTypeRef typeRef,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!(typeRef instanceof VarStringTypeRef varStringTypeRef)) {
+      return false;
+    }
+    ResolvedVarString resolvedVarString =
+        generationContext.reusableVarStringByName().get(varStringTypeRef.varStringTypeName());
+    if (resolvedVarString == null) {
+      diagnostics.add(
+          unsupportedTypeRefDiagnostic(
+              messageType.name(),
+              resolvedField.name(),
+              typeRef.getClass().getSimpleName(),
+              outputPath,
+              "Reusable varString was not found: " + varStringTypeRef.varStringTypeName()));
+      return true;
+    }
+    checkVarStringSupport(
+        resolvedVarString, messageType, primitiveFieldByName, outputPath, diagnostics);
+    return true;
   }
 
   /**
@@ -1306,122 +1474,6 @@ public final class CppCodeGenerator {
           .containsKey(scaledIntTypeRef.scaledIntTypeName());
     }
     return false;
-  }
-
-  /**
-   * Builds a stable lookup map from message type name to resolved message object.
-   *
-   * @param schema resolved schema that contains message types
-   * @return immutable map keyed by message type name
-   */
-  private static Map<String, ResolvedMessageType> indexMessageTypes(ResolvedSchema schema) {
-    Map<String, ResolvedMessageType> messageTypeByName = new LinkedHashMap<>();
-    for (ResolvedMessageType messageType : schema.messageTypes()) {
-      messageTypeByName.put(messageType.name(), messageType);
-    }
-    return Map.copyOf(messageTypeByName);
-  }
-
-  /**
-   * Builds a stable lookup map from float type name to resolved float definition.
-   *
-   * @param reusableFloats reusable float definitions from schema scope
-   * @return immutable float lookup map
-   */
-  private static Map<String, ResolvedFloat> mapFloats(List<ResolvedFloat> reusableFloats) {
-    Map<String, ResolvedFloat> reusableFloatByName = new LinkedHashMap<>();
-    for (ResolvedFloat resolvedFloat : reusableFloats) {
-      reusableFloatByName.put(resolvedFloat.name(), resolvedFloat);
-    }
-    return Map.copyOf(reusableFloatByName);
-  }
-
-  /**
-   * Builds a stable lookup map from scaled-int type name to definition.
-   *
-   * @param reusableScaledInts reusable scaled-int definitions from schema scope
-   * @return immutable scaled-int lookup map
-   */
-  private static Map<String, ResolvedScaledInt> mapScaledInts(
-      List<ResolvedScaledInt> reusableScaledInts) {
-    Map<String, ResolvedScaledInt> reusableScaledIntByName = new LinkedHashMap<>();
-    for (ResolvedScaledInt resolvedScaledInt : reusableScaledInts) {
-      reusableScaledIntByName.put(resolvedScaledInt.name(), resolvedScaledInt);
-    }
-    return Map.copyOf(reusableScaledIntByName);
-  }
-
-  /**
-   * Builds a stable lookup map from array type name to definition.
-   *
-   * @param reusableArrays reusable array definitions from schema scope
-   * @return immutable array lookup map
-   */
-  private static Map<String, ResolvedArray> mapArrays(List<ResolvedArray> reusableArrays) {
-    Map<String, ResolvedArray> reusableArrayByName = new LinkedHashMap<>();
-    for (ResolvedArray resolvedArray : reusableArrays) {
-      reusableArrayByName.put(resolvedArray.name(), resolvedArray);
-    }
-    return Map.copyOf(reusableArrayByName);
-  }
-
-  /**
-   * Builds a stable lookup map from vector type name to definition.
-   *
-   * @param reusableVectors reusable vector definitions from schema scope
-   * @return immutable vector lookup map
-   */
-  private static Map<String, ResolvedVector> mapVectors(List<ResolvedVector> reusableVectors) {
-    Map<String, ResolvedVector> reusableVectorByName = new LinkedHashMap<>();
-    for (ResolvedVector resolvedVector : reusableVectors) {
-      reusableVectorByName.put(resolvedVector.name(), resolvedVector);
-    }
-    return Map.copyOf(reusableVectorByName);
-  }
-
-  /**
-   * Builds a stable lookup map from blob-array type name to definition.
-   *
-   * @param reusableBlobArrays reusable blob-array definitions from schema scope
-   * @return immutable blob-array lookup map
-   */
-  private static Map<String, ResolvedBlobArray> mapBlobArrays(
-      List<ResolvedBlobArray> reusableBlobArrays) {
-    Map<String, ResolvedBlobArray> reusableBlobArrayByName = new LinkedHashMap<>();
-    for (ResolvedBlobArray resolvedBlobArray : reusableBlobArrays) {
-      reusableBlobArrayByName.put(resolvedBlobArray.name(), resolvedBlobArray);
-    }
-    return Map.copyOf(reusableBlobArrayByName);
-  }
-
-  /**
-   * Builds a stable lookup map from blob-vector type name to definition.
-   *
-   * @param reusableBlobVectors reusable blob-vector definitions from schema scope
-   * @return immutable blob-vector lookup map
-   */
-  private static Map<String, ResolvedBlobVector> mapBlobVectors(
-      List<ResolvedBlobVector> reusableBlobVectors) {
-    Map<String, ResolvedBlobVector> reusableBlobVectorByName = new LinkedHashMap<>();
-    for (ResolvedBlobVector resolvedBlobVector : reusableBlobVectors) {
-      reusableBlobVectorByName.put(resolvedBlobVector.name(), resolvedBlobVector);
-    }
-    return Map.copyOf(reusableBlobVectorByName);
-  }
-
-  /**
-   * Builds a stable lookup map from varString type name to definition.
-   *
-   * @param reusableVarStrings reusable varString definitions from schema scope
-   * @return immutable varString lookup map
-   */
-  private static Map<String, ResolvedVarString> mapVarStrings(
-      List<ResolvedVarString> reusableVarStrings) {
-    Map<String, ResolvedVarString> reusableVarStringByName = new LinkedHashMap<>();
-    for (ResolvedVarString resolvedVarString : reusableVarStrings) {
-      reusableVarStringByName.put(resolvedVarString.name(), resolvedVarString);
-    }
-    return Map.copyOf(reusableVarStringByName);
   }
 
   /**
@@ -2886,7 +2938,8 @@ public final class CppCodeGenerator {
    */
   private static void appendEncodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
-    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    ChecksumRangeRules.ChecksumRange checksumRange =
+        requiredChecksumRange(resolvedChecksum.range());
     String algorithm = resolvedChecksum.algorithm();
     builder
         .append("  {\n")
@@ -3980,7 +4033,8 @@ public final class CppCodeGenerator {
    */
   private static void appendDecodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
-    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    ChecksumRangeRules.ChecksumRange checksumRange =
+        requiredChecksumRange(resolvedChecksum.range());
     String algorithm = resolvedChecksum.algorithm();
     builder
         .append("  {\n")
@@ -4113,20 +4167,7 @@ public final class CppCodeGenerator {
    * @return {@code true} when any member is a checksum
    */
   private static boolean containsChecksumMember(List<ResolvedMessageMember> members) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedChecksum) {
-        return true;
-      }
-      if (member instanceof ResolvedIfBlock resolvedIfBlock
-          && containsChecksumMember(resolvedIfBlock.members())) {
-        return true;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType
-          && containsChecksumMember(resolvedNestedType.members())) {
-        return true;
-      }
-    }
-    return false;
+    return MemberTraversal.anyMatch(members, member -> member instanceof ResolvedChecksum);
   }
 
   /**
@@ -4198,29 +4239,11 @@ public final class CppCodeGenerator {
    * @return terminator literal when present, otherwise {@code null}
    */
   private static String terminatorLiteral(ResolvedLengthMode lengthMode) {
-    if (lengthMode instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
-      return resolvedTerminatorValueLength.value();
-    }
-    if (lengthMode instanceof ResolvedTerminatorField resolvedTerminatorField) {
-      return terminatorLiteral(resolvedTerminatorField.next());
+    if (lengthMode instanceof ResolvedTerminatorValueLength
+        || lengthMode instanceof ResolvedTerminatorField) {
+      return LengthModeRules.terminatorLiteral(lengthMode);
     }
     return null;
-  }
-
-  /**
-   * Resolves optional terminator literal from one terminator node.
-   *
-   * @param terminatorNode resolved terminator node
-   * @return terminator literal when present, otherwise {@code null}
-   */
-  private static String terminatorLiteral(ResolvedTerminatorNode terminatorNode) {
-    if (terminatorNode == null) {
-      return null;
-    }
-    if (terminatorNode instanceof ResolvedTerminatorMatch resolvedTerminatorMatch) {
-      return resolvedTerminatorMatch.value();
-    }
-    return terminatorLiteral(((ResolvedTerminatorField) terminatorNode).next());
   }
 
   /**
@@ -4230,17 +4253,7 @@ public final class CppCodeGenerator {
    * @return parsed integer value
    */
   private static BigInteger parseNumericLiteral(String literal) {
-    String trimmed = literal.trim();
-    if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
-      return new BigInteger(trimmed.substring(2), 16);
-    }
-    if (trimmed.startsWith("-0x") || trimmed.startsWith("-0X")) {
-      return new BigInteger(trimmed.substring(3), 16).negate();
-    }
-    if (trimmed.matches("-?[0-9]+")) {
-      return new BigInteger(trimmed, 10);
-    }
-    return new BigInteger(trimmed, 16);
+    return PrimitiveNumericRules.parseNumericLiteral(literal);
   }
 
   /**
@@ -4249,30 +4262,8 @@ public final class CppCodeGenerator {
    * @param rangeText checksum range text
    * @return parsed checksum range, or {@code null} when invalid
    */
-  private static ChecksumRange parseChecksumRange(String rangeText) {
-    int separator = rangeText.indexOf("..");
-    if (separator < 0 || separator != rangeText.lastIndexOf("..")) {
-      return null;
-    }
-    String startText = rangeText.substring(0, separator).trim();
-    String endText = rangeText.substring(separator + 2).trim();
-    if (startText.isEmpty() || endText.isEmpty()) {
-      return null;
-    }
-    try {
-      BigInteger start = parseNumericLiteral(startText);
-      BigInteger end = parseNumericLiteral(endText);
-      if (start.signum() < 0 || end.signum() < 0 || start.compareTo(end) > 0) {
-        return null;
-      }
-      if (start.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0
-          || end.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-        return null;
-      }
-      return new ChecksumRange(start.intValueExact(), end.intValueExact());
-    } catch (NumberFormatException | ArithmeticException exception) {
-      return null;
-    }
+  private static ChecksumRangeRules.ChecksumRange parseChecksumRange(String rangeText) {
+    return ChecksumRangeRules.parse(rangeText);
   }
 
   /**
@@ -4281,12 +4272,8 @@ public final class CppCodeGenerator {
    * @param rangeText checksum range text
    * @return parsed checksum range
    */
-  private static ChecksumRange requiredChecksumRange(String rangeText) {
-    ChecksumRange checksumRange = parseChecksumRange(rangeText);
-    if (checksumRange == null) {
-      throw new IllegalStateException("Unsupported checksum range: " + rangeText);
-    }
-    return checksumRange;
+  private static ChecksumRangeRules.ChecksumRange requiredChecksumRange(String rangeText) {
+    return ChecksumRangeRules.require(rangeText);
   }
 
   /**
@@ -4347,10 +4334,7 @@ public final class CppCodeGenerator {
    * @return {@code true} when unsigned
    */
   private static boolean isUnsignedPrimitive(PrimitiveType primitiveType) {
-    return primitiveType == PrimitiveType.UINT8
-        || primitiveType == PrimitiveType.UINT16
-        || primitiveType == PrimitiveType.UINT32
-        || primitiveType == PrimitiveType.UINT64;
+    return PrimitiveNumericRules.isUnsignedPrimitive(primitiveType);
   }
 
   /**
@@ -4388,31 +4372,7 @@ public final class CppCodeGenerator {
    * @return {@code true} when representable
    */
   private static boolean fitsPrimitiveRange(BigInteger value, PrimitiveType primitiveType) {
-    return switch (primitiveType) {
-      case UINT8 -> inRange(value, BigInteger.ZERO, BigInteger.valueOf(255));
-      case UINT16 -> inRange(value, BigInteger.ZERO, BigInteger.valueOf(65_535));
-      case UINT32 -> inRange(value, BigInteger.ZERO, BigInteger.valueOf(4_294_967_295L));
-      case UINT64 -> inRange(value, BigInteger.ZERO, new BigInteger("18446744073709551615"));
-      case INT8 -> inRange(value, BigInteger.valueOf(-128), BigInteger.valueOf(127));
-      case INT16 -> inRange(value, BigInteger.valueOf(-32_768), BigInteger.valueOf(32_767));
-      case INT32 -> inRange(
-          value, BigInteger.valueOf(Integer.MIN_VALUE), BigInteger.valueOf(Integer.MAX_VALUE));
-      case INT64 -> inRange(
-          value, BigInteger.valueOf(Long.MIN_VALUE), BigInteger.valueOf(Long.MAX_VALUE));
-    };
-  }
-
-  /**
-   * Returns whether a value is between two inclusive bounds.
-   *
-   * @param value value to check
-   * @param lowerInclusive inclusive lower bound
-   * @param upperInclusive inclusive upper bound
-   * @return {@code true} when in range
-   */
-  private static boolean inRange(
-      BigInteger value, BigInteger lowerInclusive, BigInteger upperInclusive) {
-    return value.compareTo(lowerInclusive) >= 0 && value.compareTo(upperInclusive) <= 0;
+    return PrimitiveNumericRules.fitsPrimitiveRange(value, primitiveType);
   }
 
   /**
@@ -4662,14 +4622,6 @@ public final class CppCodeGenerator {
   }
 
   /**
-   * Parsed checksum range bounds.
-   *
-   * @param startInclusive first byte index in range
-   * @param endInclusive last byte index in range
-   */
-  private record ChecksumRange(int startInclusive, int endInclusive) {}
-
-  /**
    * Immutable lookup container used by C++ generation helpers.
    *
    * @param messageTypeByName message type lookup map
@@ -4700,6 +4652,24 @@ public final class CppCodeGenerator {
       reusableBlobArrayByName = Map.copyOf(reusableBlobArrayByName);
       reusableBlobVectorByName = Map.copyOf(reusableBlobVectorByName);
       reusableVarStringByName = Map.copyOf(reusableVarStringByName);
+    }
+
+    /**
+     * Creates one generation context from the shared schema index.
+     *
+     * @param schemaIndex shared schema index
+     * @return generation context used by C++ code generation
+     */
+    private static GenerationContext fromSchemaIndex(SchemaIndex schemaIndex) {
+      return new GenerationContext(
+          schemaIndex.messageTypeByName(),
+          schemaIndex.reusableFloatByName(),
+          schemaIndex.reusableScaledIntByName(),
+          schemaIndex.reusableArrayByName(),
+          schemaIndex.reusableVectorByName(),
+          schemaIndex.reusableBlobArrayByName(),
+          schemaIndex.reusableBlobVectorByName(),
+          schemaIndex.reusableVarStringByName());
     }
   }
 }

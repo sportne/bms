@@ -1,5 +1,11 @@
 package io.github.sportne.bms.codegen.java;
 
+import io.github.sportne.bms.codegen.common.ChecksumRangeRules;
+import io.github.sportne.bms.codegen.common.LengthModeRules;
+import io.github.sportne.bms.codegen.common.MemberTraversal;
+import io.github.sportne.bms.codegen.common.PrimitiveFieldIndex;
+import io.github.sportne.bms.codegen.common.PrimitiveNumericRules;
+import io.github.sportne.bms.codegen.common.SchemaIndex;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
@@ -36,7 +42,6 @@ import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
-import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
@@ -55,7 +60,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -698,132 +702,7 @@ public final class JavaCodeGenerator {
    * @return generation context with deterministic lookup maps
    */
   private static GenerationContext buildGenerationContext(ResolvedSchema schema) {
-    return new GenerationContext(
-        mapMessages(schema.messageTypes()),
-        mapFloats(schema.reusableFloats()),
-        mapScaledInts(schema.reusableScaledInts()),
-        mapArrays(schema.reusableArrays()),
-        mapVectors(schema.reusableVectors()),
-        mapBlobArrays(schema.reusableBlobArrays()),
-        mapBlobVectors(schema.reusableBlobVectors()),
-        mapVarStrings(schema.reusableVarStrings()));
-  }
-
-  /**
-   * Builds a stable message-name lookup map.
-   *
-   * @param messageTypes resolved message types
-   * @return immutable message lookup map
-   */
-  private static Map<String, ResolvedMessageType> mapMessages(
-      List<ResolvedMessageType> messageTypes) {
-    Map<String, ResolvedMessageType> messageTypeByName = new LinkedHashMap<>();
-    for (ResolvedMessageType messageType : messageTypes) {
-      messageTypeByName.put(messageType.name(), messageType);
-    }
-    return Map.copyOf(messageTypeByName);
-  }
-
-  /**
-   * Builds a stable reusable-float lookup map.
-   *
-   * @param reusableFloats reusable float definitions
-   * @return immutable float lookup map
-   */
-  private static Map<String, ResolvedFloat> mapFloats(List<ResolvedFloat> reusableFloats) {
-    Map<String, ResolvedFloat> reusableFloatByName = new LinkedHashMap<>();
-    for (ResolvedFloat resolvedFloat : reusableFloats) {
-      reusableFloatByName.put(resolvedFloat.name(), resolvedFloat);
-    }
-    return Map.copyOf(reusableFloatByName);
-  }
-
-  /**
-   * Builds a stable reusable-scaledInt lookup map.
-   *
-   * @param reusableScaledInts reusable scaledInt definitions
-   * @return immutable scaledInt lookup map
-   */
-  private static Map<String, ResolvedScaledInt> mapScaledInts(
-      List<ResolvedScaledInt> reusableScaledInts) {
-    Map<String, ResolvedScaledInt> reusableScaledIntByName = new LinkedHashMap<>();
-    for (ResolvedScaledInt resolvedScaledInt : reusableScaledInts) {
-      reusableScaledIntByName.put(resolvedScaledInt.name(), resolvedScaledInt);
-    }
-    return Map.copyOf(reusableScaledIntByName);
-  }
-
-  /**
-   * Builds a stable reusable-array lookup map.
-   *
-   * @param reusableArrays reusable array definitions
-   * @return immutable array lookup map
-   */
-  private static Map<String, ResolvedArray> mapArrays(List<ResolvedArray> reusableArrays) {
-    Map<String, ResolvedArray> reusableArrayByName = new LinkedHashMap<>();
-    for (ResolvedArray resolvedArray : reusableArrays) {
-      reusableArrayByName.put(resolvedArray.name(), resolvedArray);
-    }
-    return Map.copyOf(reusableArrayByName);
-  }
-
-  /**
-   * Builds a stable reusable-vector lookup map.
-   *
-   * @param reusableVectors reusable vector definitions
-   * @return immutable vector lookup map
-   */
-  private static Map<String, ResolvedVector> mapVectors(List<ResolvedVector> reusableVectors) {
-    Map<String, ResolvedVector> reusableVectorByName = new LinkedHashMap<>();
-    for (ResolvedVector resolvedVector : reusableVectors) {
-      reusableVectorByName.put(resolvedVector.name(), resolvedVector);
-    }
-    return Map.copyOf(reusableVectorByName);
-  }
-
-  /**
-   * Builds a stable reusable-blobArray lookup map.
-   *
-   * @param reusableBlobArrays reusable blobArray definitions
-   * @return immutable blobArray lookup map
-   */
-  private static Map<String, ResolvedBlobArray> mapBlobArrays(
-      List<ResolvedBlobArray> reusableBlobArrays) {
-    Map<String, ResolvedBlobArray> reusableBlobArrayByName = new LinkedHashMap<>();
-    for (ResolvedBlobArray resolvedBlobArray : reusableBlobArrays) {
-      reusableBlobArrayByName.put(resolvedBlobArray.name(), resolvedBlobArray);
-    }
-    return Map.copyOf(reusableBlobArrayByName);
-  }
-
-  /**
-   * Builds a stable reusable-blobVector lookup map.
-   *
-   * @param reusableBlobVectors reusable blobVector definitions
-   * @return immutable blobVector lookup map
-   */
-  private static Map<String, ResolvedBlobVector> mapBlobVectors(
-      List<ResolvedBlobVector> reusableBlobVectors) {
-    Map<String, ResolvedBlobVector> reusableBlobVectorByName = new LinkedHashMap<>();
-    for (ResolvedBlobVector resolvedBlobVector : reusableBlobVectors) {
-      reusableBlobVectorByName.put(resolvedBlobVector.name(), resolvedBlobVector);
-    }
-    return Map.copyOf(reusableBlobVectorByName);
-  }
-
-  /**
-   * Builds a stable reusable-varString lookup map.
-   *
-   * @param reusableVarStrings reusable varString definitions
-   * @return immutable varString lookup map
-   */
-  private static Map<String, ResolvedVarString> mapVarStrings(
-      List<ResolvedVarString> reusableVarStrings) {
-    Map<String, ResolvedVarString> reusableVarStringByName = new LinkedHashMap<>();
-    for (ResolvedVarString resolvedVarString : reusableVarStrings) {
-      reusableVarStringByName.put(resolvedVarString.name(), resolvedVarString);
-    }
-    return Map.copyOf(reusableVarStringByName);
+    return GenerationContext.fromSchemaIndex(SchemaIndex.fromResolvedSchema(schema));
   }
 
   /**
@@ -867,33 +746,7 @@ public final class JavaCodeGenerator {
    * @return primitive field lookup map
    */
   private static Map<String, PrimitiveType> primitiveFieldsByName(ResolvedMessageType messageType) {
-    Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
-    collectPrimitiveFields(primitiveFieldByName, messageType.members());
-    return Map.copyOf(primitiveFieldByName);
-  }
-
-  /**
-   * Collects primitive scalar field types from message members recursively.
-   *
-   * @param primitiveFieldByName destination primitive-field lookup map
-   * @param members members to scan
-   */
-  private static void collectPrimitiveFields(
-      Map<String, PrimitiveType> primitiveFieldByName, List<ResolvedMessageMember> members) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedField resolvedField
-          && resolvedField.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
-        primitiveFieldByName.putIfAbsent(resolvedField.name(), primitiveTypeRef.primitiveType());
-        continue;
-      }
-      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-        collectPrimitiveFields(primitiveFieldByName, resolvedIfBlock.members());
-        continue;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType) {
-        collectPrimitiveFields(primitiveFieldByName, resolvedNestedType.members());
-      }
-    }
+    return PrimitiveFieldIndex.collect(messageType);
   }
 
   /**
@@ -1824,20 +1677,7 @@ public final class JavaCodeGenerator {
    * @return {@code true} when at least one checksum member is present
    */
   private static boolean containsChecksumMember(List<ResolvedMessageMember> members) {
-    for (ResolvedMessageMember member : members) {
-      if (member instanceof ResolvedChecksum) {
-        return true;
-      }
-      if (member instanceof ResolvedIfBlock resolvedIfBlock
-          && containsChecksumMember(resolvedIfBlock.members())) {
-        return true;
-      }
-      if (member instanceof ResolvedMessageType resolvedNestedType
-          && containsChecksumMember(resolvedNestedType.members())) {
-        return true;
-      }
-    }
-    return false;
+    return MemberTraversal.anyMatch(members, member -> member instanceof ResolvedChecksum);
   }
 
   /**
@@ -3401,7 +3241,8 @@ public final class JavaCodeGenerator {
    */
   private static void appendEncodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
-    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    ChecksumRangeRules.ChecksumRange checksumRange =
+        requiredChecksumRange(resolvedChecksum.range());
     String algorithm = resolvedChecksum.algorithm();
     builder
         .append("    {\n")
@@ -3483,11 +3324,9 @@ public final class JavaCodeGenerator {
    * @return terminator literal when present, otherwise {@code null}
    */
   private static String terminatorLiteral(ResolvedLengthMode lengthMode) {
-    if (lengthMode instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
-      return resolvedTerminatorValueLength.value();
-    }
-    if (lengthMode instanceof ResolvedTerminatorField resolvedTerminatorField) {
-      return terminatorLiteral(resolvedTerminatorField.next());
+    if (lengthMode instanceof ResolvedTerminatorValueLength
+        || lengthMode instanceof ResolvedTerminatorField) {
+      return LengthModeRules.terminatorLiteral(lengthMode);
     }
     return null;
   }
@@ -3502,10 +3341,7 @@ public final class JavaCodeGenerator {
     if (terminatorNode == null) {
       return null;
     }
-    if (terminatorNode instanceof ResolvedTerminatorMatch resolvedTerminatorMatch) {
-      return resolvedTerminatorMatch.value();
-    }
-    return terminatorLiteral(((ResolvedTerminatorField) terminatorNode).next());
+    return LengthModeRules.terminatorLiteral(terminatorNode);
   }
 
   /**
@@ -4505,7 +4341,8 @@ public final class JavaCodeGenerator {
    */
   private static void appendDecodeChecksum(
       StringBuilder builder, ResolvedChecksum resolvedChecksum) {
-    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    ChecksumRangeRules.ChecksumRange checksumRange =
+        requiredChecksumRange(resolvedChecksum.range());
     String algorithm = resolvedChecksum.algorithm();
     builder
         .append("    {\n")
@@ -4728,35 +4565,8 @@ public final class JavaCodeGenerator {
    * @param rangeText checksum range text from XML
    * @return parsed checksum range, or {@code null} when invalid
    */
-  private static ChecksumRange parseChecksumRange(String rangeText) {
-    int separator = rangeText.indexOf("..");
-    if (separator < 0 || separator != rangeText.lastIndexOf("..")) {
-      return null;
-    }
-
-    String startText = rangeText.substring(0, separator).trim();
-    String endText = rangeText.substring(separator + 2).trim();
-    if (startText.isEmpty() || endText.isEmpty()) {
-      return null;
-    }
-
-    try {
-      BigInteger start = parseNumericLiteral(startText);
-      BigInteger end = parseNumericLiteral(endText);
-      if (start.compareTo(BigInteger.ZERO) < 0 || end.compareTo(BigInteger.ZERO) < 0) {
-        return null;
-      }
-      if (start.compareTo(end) > 0) {
-        return null;
-      }
-      if (start.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0
-          || end.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
-        return null;
-      }
-      return new ChecksumRange(start.intValueExact(), end.intValueExact());
-    } catch (NumberFormatException | ArithmeticException exception) {
-      return null;
-    }
+  private static ChecksumRangeRules.ChecksumRange parseChecksumRange(String rangeText) {
+    return ChecksumRangeRules.parse(rangeText);
   }
 
   /**
@@ -4864,12 +4674,8 @@ public final class JavaCodeGenerator {
    * @param rangeText checksum range text from XML
    * @return parsed checksum range
    */
-  private static ChecksumRange requiredChecksumRange(String rangeText) {
-    ChecksumRange checksumRange = parseChecksumRange(rangeText);
-    if (checksumRange == null) {
-      throw new IllegalStateException("Unsupported checksum range: " + rangeText);
-    }
-    return checksumRange;
+  private static ChecksumRangeRules.ChecksumRange requiredChecksumRange(String rangeText) {
+    return ChecksumRangeRules.require(rangeText);
   }
 
   /**
@@ -4880,17 +4686,7 @@ public final class JavaCodeGenerator {
    * @throws NumberFormatException when the literal is not numeric
    */
   private static BigInteger parseNumericLiteral(String literal) {
-    String trimmed = literal.trim();
-    if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
-      return new BigInteger(trimmed.substring(2), 16);
-    }
-    if (trimmed.startsWith("-") && (trimmed.startsWith("-0x") || trimmed.startsWith("-0X"))) {
-      return new BigInteger(trimmed.substring(3), 16).negate();
-    }
-    if (trimmed.matches("-?[0-9]+")) {
-      return new BigInteger(trimmed, 10);
-    }
-    return new BigInteger(trimmed, 16);
+    return PrimitiveNumericRules.parseNumericLiteral(literal);
   }
 
   /**
@@ -4902,35 +4698,7 @@ public final class JavaCodeGenerator {
    */
   private static boolean fitsPrimitiveRange(
       BigInteger numericLiteral, PrimitiveType primitiveType) {
-    return switch (primitiveType) {
-      case UINT8 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(255));
-      case UINT16 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(65_535));
-      case UINT32 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(4_294_967_295L));
-      case UINT64 -> inRange(
-          numericLiteral, BigInteger.ZERO, new BigInteger("18446744073709551615"));
-      case INT8 -> inRange(numericLiteral, BigInteger.valueOf(-128), BigInteger.valueOf(127));
-      case INT16 -> inRange(
-          numericLiteral, BigInteger.valueOf(-32_768), BigInteger.valueOf(32_767));
-      case INT32 -> inRange(
-          numericLiteral,
-          BigInteger.valueOf(Integer.MIN_VALUE),
-          BigInteger.valueOf(Integer.MAX_VALUE));
-      case INT64 -> inRange(
-          numericLiteral, BigInteger.valueOf(Long.MIN_VALUE), BigInteger.valueOf(Long.MAX_VALUE));
-    };
-  }
-
-  /**
-   * Checks whether a numeric value is between inclusive lower and upper bounds.
-   *
-   * @param value value to check
-   * @param lowerInclusive lower bound (inclusive)
-   * @param upperInclusive upper bound (inclusive)
-   * @return {@code true} when value is in range
-   */
-  private static boolean inRange(
-      BigInteger value, BigInteger lowerInclusive, BigInteger upperInclusive) {
-    return value.compareTo(lowerInclusive) >= 0 && value.compareTo(upperInclusive) <= 0;
+    return PrimitiveNumericRules.fitsPrimitiveRange(numericLiteral, primitiveType);
   }
 
   /**
@@ -4970,14 +4738,6 @@ public final class JavaCodeGenerator {
     return safeDecimal.toPlainString() + "d";
   }
 
-  /**
-   * Parsed checksum range bounds.
-   *
-   * @param startInclusive first byte index (inclusive)
-   * @param endInclusive last byte index (inclusive)
-   */
-  private record ChecksumRange(int startInclusive, int endInclusive) {}
-
   /** Immutable lookup maps used while rendering one schema. */
   private record GenerationContext(
       Map<String, ResolvedMessageType> messageTypeByName,
@@ -4987,5 +4747,23 @@ public final class JavaCodeGenerator {
       Map<String, ResolvedVector> reusableVectorByName,
       Map<String, ResolvedBlobArray> reusableBlobArrayByName,
       Map<String, ResolvedBlobVector> reusableBlobVectorByName,
-      Map<String, ResolvedVarString> reusableVarStringByName) {}
+      Map<String, ResolvedVarString> reusableVarStringByName) {
+    /**
+     * Creates one generation context from a shared schema index.
+     *
+     * @param schemaIndex shared schema index
+     * @return generation context used by Java code generation
+     */
+    private static GenerationContext fromSchemaIndex(SchemaIndex schemaIndex) {
+      return new GenerationContext(
+          schemaIndex.messageTypeByName(),
+          schemaIndex.reusableFloatByName(),
+          schemaIndex.reusableScaledIntByName(),
+          schemaIndex.reusableArrayByName(),
+          schemaIndex.reusableVectorByName(),
+          schemaIndex.reusableBlobArrayByName(),
+          schemaIndex.reusableBlobVectorByName(),
+          schemaIndex.reusableVarStringByName());
+    }
+  }
 }

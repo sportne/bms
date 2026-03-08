@@ -1,6 +1,5 @@
 package io.github.sportne.bms.semantic;
 
-import io.github.sportne.bms.model.IfLogicalOperator;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBitFlag;
@@ -44,9 +43,7 @@ import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
-import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
 import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
-import io.github.sportne.bms.model.resolved.ResolvedIfLogicalCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
@@ -1204,7 +1201,7 @@ public final class SemanticResolver {
               context.sourcePath));
     } else {
       resolvedCondition =
-          resolveIfCondition(
+          ConditionSemanticValidator.resolveIfCondition(
               parsedMessageType.name(),
               parsedIfBlock.test(),
               messageState.primitiveFieldByName,
@@ -1234,153 +1231,6 @@ public final class SemanticResolver {
       return null;
     }
     return new ResolvedIfBlock(resolvedCondition, resolvedMembers);
-  }
-
-  /**
-   * Parses and validates one textual {@code if} condition.
-   *
-   * @param messageName parent message name used in diagnostics
-   * @param conditionText raw condition text
-   * @param primitiveFieldByName primitive field lookup map
-   * @param sourcePath source path used in diagnostics
-   * @param diagnostics destination diagnostics list
-   * @return resolved condition tree, or {@code null} when invalid
-   */
-  private static ResolvedIfCondition resolveIfCondition(
-      String messageName,
-      String conditionText,
-      Map<String, PrimitiveType> primitiveFieldByName,
-      String sourcePath,
-      List<Diagnostic> diagnostics) {
-    IfConditionExpressionParser.ParsedCondition parsedCondition;
-    try {
-      parsedCondition = IfConditionExpressionParser.parse(conditionText);
-    } catch (IfConditionExpressionParser.IfConditionParseException exception) {
-      diagnostics.add(
-          error(
-              "SEMANTIC_INVALID_IF_TEST",
-              "if@test in message " + messageName + " is invalid: " + exception.getMessage(),
-              sourcePath));
-      return null;
-    }
-    return resolveIfConditionNode(
-        messageName, conditionText, parsedCondition, primitiveFieldByName, sourcePath, diagnostics);
-  }
-
-  /**
-   * Resolves one parsed condition node into a resolved node and validates semantic rules.
-   *
-   * @param messageName parent message name used in diagnostics
-   * @param conditionText raw condition text
-   * @param parsedCondition parsed condition node
-   * @param primitiveFieldByName primitive field lookup map
-   * @param sourcePath source path used in diagnostics
-   * @param diagnostics destination diagnostics list
-   * @return resolved condition node, or {@code null} when invalid
-   */
-  private static ResolvedIfCondition resolveIfConditionNode(
-      String messageName,
-      String conditionText,
-      IfConditionExpressionParser.ParsedCondition parsedCondition,
-      Map<String, PrimitiveType> primitiveFieldByName,
-      String sourcePath,
-      List<Diagnostic> diagnostics) {
-    if (parsedCondition instanceof IfConditionExpressionParser.ParsedComparisonCondition parsed) {
-      PrimitiveType primitiveType = primitiveFieldByName.get(parsed.fieldName());
-      if (primitiveType == null) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_INVALID_IF_TEST",
-                "if@test in message "
-                    + messageName
-                    + " references unknown primitive field: "
-                    + parsed.fieldName()
-                    + ". Condition: "
-                    + conditionText,
-                sourcePath));
-        return null;
-      }
-      if (!fitsPrimitiveRange(parsed.literal(), primitiveType)) {
-        diagnostics.add(
-            error(
-                "SEMANTIC_INVALID_IF_TEST",
-                "if@test in message "
-                    + messageName
-                    + " uses literal out of range for field "
-                    + parsed.fieldName()
-                    + ": "
-                    + parsed.literal(),
-                sourcePath));
-        return null;
-      }
-      return new ResolvedIfComparison(
-          parsed.fieldName(), primitiveType, parsed.operator(), parsed.literal());
-    }
-    if (parsedCondition
-        instanceof IfConditionExpressionParser.ParsedLogicalCondition parsedLogical) {
-      ResolvedIfCondition left =
-          resolveIfConditionNode(
-              messageName,
-              conditionText,
-              parsedLogical.left(),
-              primitiveFieldByName,
-              sourcePath,
-              diagnostics);
-      ResolvedIfCondition right =
-          resolveIfConditionNode(
-              messageName,
-              conditionText,
-              parsedLogical.right(),
-              primitiveFieldByName,
-              sourcePath,
-              diagnostics);
-      if (left == null || right == null) {
-        return null;
-      }
-      IfLogicalOperator operator = parsedLogical.operator();
-      return new ResolvedIfLogicalCondition(left, operator, right);
-    }
-    throw new IllegalStateException("Unsupported parsed if-condition node: " + parsedCondition);
-  }
-
-  /**
-   * Returns whether one numeric literal fits a primitive integer type.
-   *
-   * @param numericLiteral parsed literal value
-   * @param primitiveType target primitive type
-   * @return {@code true} when value fits the primitive range
-   */
-  private static boolean fitsPrimitiveRange(
-      BigInteger numericLiteral, PrimitiveType primitiveType) {
-    return switch (primitiveType) {
-      case UINT8 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(255));
-      case UINT16 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(65_535));
-      case UINT32 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(4_294_967_295L));
-      case UINT64 -> inRange(
-          numericLiteral, BigInteger.ZERO, new BigInteger("18446744073709551615"));
-      case INT8 -> inRange(numericLiteral, BigInteger.valueOf(-128), BigInteger.valueOf(127));
-      case INT16 -> inRange(
-          numericLiteral, BigInteger.valueOf(-32_768), BigInteger.valueOf(32_767));
-      case INT32 -> inRange(
-          numericLiteral,
-          BigInteger.valueOf(Integer.MIN_VALUE),
-          BigInteger.valueOf(Integer.MAX_VALUE));
-      case INT64 -> inRange(
-          numericLiteral, BigInteger.valueOf(Long.MIN_VALUE), BigInteger.valueOf(Long.MAX_VALUE));
-    };
-  }
-
-  /**
-   * Returns whether one value is inside an inclusive range.
-   *
-   * @param value candidate value
-   * @param lowerInclusive inclusive lower bound
-   * @param upperInclusive inclusive upper bound
-   * @return {@code true} when value is within the range
-   */
-  private static boolean inRange(
-      BigInteger value, BigInteger lowerInclusive, BigInteger upperInclusive) {
-    return value.compareTo(lowerInclusive) >= 0 && value.compareTo(upperInclusive) <= 0;
   }
 
   /**

@@ -42,6 +42,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -78,12 +79,16 @@ public final class SpecParser {
       BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
 
   private final XMLInputFactory inputFactory;
+  private final Map<String, RootElementHandler> rootElementHandlers;
+  private final Map<String, MessageMemberHandler> messageMemberHandlers;
 
   /** Creates a parser and disables XML features that are not needed for BMS files. */
   public SpecParser() {
     inputFactory = XMLInputFactory.newFactory();
     inputFactory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
     inputFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+    rootElementHandlers = createRootElementHandlers();
+    messageMemberHandlers = createMessageMemberHandlers();
   }
 
   /**
@@ -170,49 +175,15 @@ public final class SpecParser {
    */
   private RootItems parseRootChildren(Path specPath, XMLStreamReader reader)
       throws XMLStreamException, BmsException {
-    List<ParsedMessageType> messageTypes = new ArrayList<>();
-    List<ParsedBitField> bitFields = new ArrayList<>();
-    List<ParsedFloat> floats = new ArrayList<>();
-    List<ParsedScaledInt> scaledInts = new ArrayList<>();
-    List<ParsedArray> arrays = new ArrayList<>();
-    List<ParsedVector> vectors = new ArrayList<>();
-    List<ParsedBlobArray> blobArrays = new ArrayList<>();
-    List<ParsedBlobVector> blobVectors = new ArrayList<>();
-    List<ParsedVarString> varStrings = new ArrayList<>();
-    List<ParsedChecksum> checksums = new ArrayList<>();
-    List<ParsedPad> pads = new ArrayList<>();
+    RootItemsBuilder rootItemsBuilder = new RootItemsBuilder();
 
     while (reader.hasNext()) {
       int event = reader.next();
       if (event == XMLStreamConstants.START_ELEMENT) {
-        parseRootChild(
-            specPath,
-            reader,
-            messageTypes,
-            bitFields,
-            floats,
-            scaledInts,
-            arrays,
-            vectors,
-            blobArrays,
-            blobVectors,
-            varStrings,
-            checksums,
-            pads);
+        parseRootChild(specPath, reader, rootItemsBuilder);
       }
       if (event == XMLStreamConstants.END_ELEMENT && ROOT_ELEMENT.equals(reader.getLocalName())) {
-        return new RootItems(
-            messageTypes,
-            bitFields,
-            floats,
-            scaledInts,
-            arrays,
-            vectors,
-            blobArrays,
-            blobVectors,
-            varStrings,
-            checksums,
-            pads);
+        return rootItemsBuilder.build();
       }
     }
 
@@ -229,49 +200,18 @@ public final class SpecParser {
    *
    * @param specPath source file path used in diagnostics
    * @param reader active XML reader positioned on a root child element
-   * @param messageTypes destination list for parsed message types
-   * @param bitFields destination list for parsed bitFields
-   * @param floats destination list for parsed floats
-   * @param scaledInts destination list for parsed scaledInts
-   * @param arrays destination list for parsed arrays
-   * @param vectors destination list for parsed vectors
-   * @param blobArrays destination list for parsed blobArrays
-   * @param blobVectors destination list for parsed blobVectors
-   * @param varStrings destination list for parsed varStrings
-   * @param checksums destination list for parsed checksums
-   * @param pads destination list for parsed pads
+   * @param rootItemsBuilder destination accumulator for all root-level parsed definitions
    * @throws XMLStreamException if XML streaming fails
    * @throws BmsException if the current root child is unsupported
    */
   private void parseRootChild(
-      Path specPath,
-      XMLStreamReader reader,
-      List<ParsedMessageType> messageTypes,
-      List<ParsedBitField> bitFields,
-      List<ParsedFloat> floats,
-      List<ParsedScaledInt> scaledInts,
-      List<ParsedArray> arrays,
-      List<ParsedVector> vectors,
-      List<ParsedBlobArray> blobArrays,
-      List<ParsedBlobVector> blobVectors,
-      List<ParsedVarString> varStrings,
-      List<ParsedChecksum> checksums,
-      List<ParsedPad> pads)
+      Path specPath, XMLStreamReader reader, RootItemsBuilder rootItemsBuilder)
       throws XMLStreamException, BmsException {
-    switch (reader.getLocalName()) {
-      case "messageType" -> messageTypes.add(parseMessageType(specPath, reader));
-      case "bitField" -> bitFields.add(parseBitField(specPath, reader));
-      case "float" -> floats.add(parseFloat(specPath, reader));
-      case "scaledInt" -> scaledInts.add(parseScaledInt(specPath, reader));
-      case "array" -> arrays.add(parseArray(specPath, reader));
-      case "vector" -> vectors.add(parseVector(specPath, reader));
-      case "blobArray" -> blobArrays.add(parseBlobArray(specPath, reader));
-      case "blobVector" -> blobVectors.add(parseBlobVector(specPath, reader));
-      case "varString" -> varStrings.add(parseVarString(specPath, reader));
-      case "checksum" -> checksums.add(parseChecksum(specPath, reader));
-      case "pad" -> pads.add(parsePad(specPath, reader));
-      default -> throw unsupportedElement(specPath, reader, "root");
+    RootElementHandler rootElementHandler = rootElementHandlers.get(reader.getLocalName());
+    if (rootElementHandler == null) {
+      throw unsupportedElement(specPath, reader, "root");
     }
+    rootElementHandler.parse(specPath, reader, rootItemsBuilder);
   }
 
   /**
@@ -370,31 +310,96 @@ public final class SpecParser {
   private ParsedMessageMember parseMessageMember(
       Path specPath, XMLStreamReader reader, String parentName, boolean allowIf)
       throws XMLStreamException, BmsException {
-    return switch (reader.getLocalName()) {
-      case "field" -> parseField(specPath, reader);
-      case "bitField" -> parseBitField(specPath, reader);
-      case "float" -> parseFloat(specPath, reader);
-      case "scaledInt" -> parseScaledInt(specPath, reader);
-      case "array" -> parseArray(specPath, reader);
-      case "vector" -> parseVector(specPath, reader);
-      case "blobArray" -> parseBlobArray(specPath, reader);
-      case "blobVector" -> parseBlobVector(specPath, reader);
-      case "varString" -> parseVarString(specPath, reader);
-      case "checksum" -> parseChecksum(specPath, reader);
-      case "pad" -> parsePad(specPath, reader);
-      case "type" -> parseTypeMember(specPath, reader);
-      case "if" -> {
-        if (!allowIf) {
-          throw parserError(
-              specPath,
-              reader,
-              "PARSER_UNSUPPORTED_ELEMENT",
-              "<" + parentName + "> does not support nested <if>.");
-        }
-        yield parseIfBlock(specPath, reader);
+    if ("if".equals(reader.getLocalName())) {
+      if (!allowIf) {
+        throw parserError(
+            specPath,
+            reader,
+            "PARSER_UNSUPPORTED_ELEMENT",
+            "<" + parentName + "> does not support nested <if>.");
       }
-      default -> throw unsupportedElement(specPath, reader, parentName);
-    };
+      return parseIfBlock(specPath, reader);
+    }
+
+    MessageMemberHandler messageMemberHandler = messageMemberHandlers.get(reader.getLocalName());
+    if (messageMemberHandler == null) {
+      throw unsupportedElement(specPath, reader, parentName);
+    }
+    return messageMemberHandler.parse(specPath, reader);
+  }
+
+  /**
+   * Builds parser handlers for root-level child elements.
+   *
+   * @return immutable map from root element name to parse handler
+   */
+  private Map<String, RootElementHandler> createRootElementHandlers() {
+    return Map.ofEntries(
+        Map.entry(
+            "messageType",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.messageTypes.add(parseMessageType(specPath, reader))),
+        Map.entry(
+            "bitField",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.bitFields.add(parseBitField(specPath, reader))),
+        Map.entry(
+            "float",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.floats.add(parseFloat(specPath, reader))),
+        Map.entry(
+            "scaledInt",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.scaledInts.add(parseScaledInt(specPath, reader))),
+        Map.entry(
+            "array",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.arrays.add(parseArray(specPath, reader))),
+        Map.entry(
+            "vector",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.vectors.add(parseVector(specPath, reader))),
+        Map.entry(
+            "blobArray",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.blobArrays.add(parseBlobArray(specPath, reader))),
+        Map.entry(
+            "blobVector",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.blobVectors.add(parseBlobVector(specPath, reader))),
+        Map.entry(
+            "varString",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.varStrings.add(parseVarString(specPath, reader))),
+        Map.entry(
+            "checksum",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.checksums.add(parseChecksum(specPath, reader))),
+        Map.entry(
+            "pad",
+            (specPath, reader, rootItemsBuilder) ->
+                rootItemsBuilder.pads.add(parsePad(specPath, reader))));
+  }
+
+  /**
+   * Builds parser handlers for message member elements.
+   *
+   * @return immutable map from member element name to parse handler
+   */
+  private Map<String, MessageMemberHandler> createMessageMemberHandlers() {
+    return Map.ofEntries(
+        Map.entry("field", this::parseField),
+        Map.entry("bitField", this::parseBitField),
+        Map.entry("float", this::parseFloat),
+        Map.entry("scaledInt", this::parseScaledInt),
+        Map.entry("array", this::parseArray),
+        Map.entry("vector", this::parseVector),
+        Map.entry("blobArray", this::parseBlobArray),
+        Map.entry("blobVector", this::parseBlobVector),
+        Map.entry("varString", this::parseVarString),
+        Map.entry("checksum", this::parseChecksum),
+        Map.entry("pad", this::parsePad),
+        Map.entry("type", this::parseTypeMember));
   }
 
   /**
@@ -1466,6 +1471,76 @@ public final class SpecParser {
     Diagnostic diagnostic =
         new Diagnostic(DiagnosticSeverity.ERROR, code, message, specPath.toString(), line, column);
     return new BmsException(message, List.of(diagnostic));
+  }
+
+  /** Parse callback for one root-level element. */
+  @FunctionalInterface
+  private interface RootElementHandler {
+    /**
+     * Parses one root child element.
+     *
+     * @param specPath source file path used in diagnostics
+     * @param reader active XML reader
+     * @param rootItemsBuilder destination accumulator for root-level parsed items
+     * @throws XMLStreamException if XML streaming fails
+     * @throws BmsException if parsing fails
+     */
+    void parse(Path specPath, XMLStreamReader reader, RootItemsBuilder rootItemsBuilder)
+        throws XMLStreamException, BmsException;
+  }
+
+  /** Parse callback for one message member element. */
+  @FunctionalInterface
+  private interface MessageMemberHandler {
+    /**
+     * Parses one message member element.
+     *
+     * @param specPath source file path used in diagnostics
+     * @param reader active XML reader
+     * @return parsed message member
+     * @throws XMLStreamException if XML streaming fails
+     * @throws BmsException if parsing fails
+     */
+    ParsedMessageMember parse(Path specPath, XMLStreamReader reader)
+        throws XMLStreamException, BmsException;
+  }
+
+  /** Mutable root-item accumulator used while scanning schema children. */
+  private static final class RootItemsBuilder {
+    private final List<ParsedMessageType> messageTypes = new ArrayList<>();
+    private final List<ParsedBitField> bitFields = new ArrayList<>();
+    private final List<ParsedFloat> floats = new ArrayList<>();
+    private final List<ParsedScaledInt> scaledInts = new ArrayList<>();
+    private final List<ParsedArray> arrays = new ArrayList<>();
+    private final List<ParsedVector> vectors = new ArrayList<>();
+    private final List<ParsedBlobArray> blobArrays = new ArrayList<>();
+    private final List<ParsedBlobVector> blobVectors = new ArrayList<>();
+    private final List<ParsedVarString> varStrings = new ArrayList<>();
+    private final List<ParsedChecksum> checksums = new ArrayList<>();
+    private final List<ParsedPad> pads = new ArrayList<>();
+
+    /** Creates one mutable root-item accumulator. */
+    private RootItemsBuilder() {}
+
+    /**
+     * Builds immutable root-item groups from accumulated values.
+     *
+     * @return immutable grouped root items
+     */
+    private RootItems build() {
+      return new RootItems(
+          messageTypes,
+          bitFields,
+          floats,
+          scaledInts,
+          arrays,
+          vectors,
+          blobArrays,
+          blobVectors,
+          varStrings,
+          checksums,
+          pads);
+    }
   }
 
   private record RootItems(

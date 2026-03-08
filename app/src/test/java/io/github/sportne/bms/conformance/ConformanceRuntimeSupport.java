@@ -17,8 +17,6 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -147,8 +145,7 @@ final class ConformanceRuntimeSupport {
       }
     }
     URL classDirectoryUrl = classDirectory.toUri().toURL();
-    return AccessController.doPrivileged(
-        (PrivilegedAction<URLClassLoader>) () -> new URLClassLoader(new URL[] {classDirectoryUrl}));
+    return new URLClassLoader(new URL[] {classDirectoryUrl});
   }
 
   /**
