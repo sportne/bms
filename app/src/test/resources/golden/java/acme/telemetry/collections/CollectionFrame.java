@@ -1,4 +1,4 @@
-package acme.telemetry;
+package acme.telemetry.collections;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -6,14 +6,82 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Objects;
 
-public final class Header {
-  public short version;
-  public int sequence;
+public final class CollectionFrame {
+  public int count;
+  public short blobCount;
+  public short[] samples;
+  public short[] events;
+  public byte[] hash;
+  public byte[] payload;
+  public short[] pathData;
+  public short[] reusableArrayField;
+  public short[] reusableVectorField;
+  public byte[] reusableBlobArrayField;
+  public byte[] reusableBlobVectorField;
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
-    writeUInt8(out, this.version);
-    writeUInt16(out, this.sequence, ByteOrder.LITTLE_ENDIAN);
+    writeUInt16(out, this.count, ByteOrder.BIG_ENDIAN);
+    writeUInt8(out, this.blobCount);
+    Objects.requireNonNull(this.samples, "samples");
+    if (this.samples.length != 4) {
+      throw new IllegalArgumentException("samples must contain exactly 4 elements.");
+    }
+    for (int indexSamples = 0; indexSamples < 4; indexSamples++) {
+      short itemSamples = this.samples[indexSamples];
+    writeUInt8(out, itemSamples);
+    }
+    Objects.requireNonNull(this.events, "events");
+    int expectedEventsCount = requireCount((this.count & 0xFFFFL), "count");
+    if (this.events.length != expectedEventsCount) {
+      throw new IllegalArgumentException("events length must match count field count.");
+    }
+    for (int indexEvents = 0; indexEvents < this.events.length; indexEvents++) {
+      short itemEvents = this.events[indexEvents];
+    writeUInt8(out, itemEvents);
+    }
+    Objects.requireNonNull(this.hash, "hash");
+    if (this.hash.length != 8) {
+      throw new IllegalArgumentException("hash must contain exactly 8 bytes.");
+    }
+    out.write(this.hash, 0, 8);
+    Objects.requireNonNull(this.payload, "payload");
+    int expectedPayloadCount = requireCount((this.blobCount & 0xFFL), "blobCount");
+    if (this.payload.length != expectedPayloadCount) {
+      throw new IllegalArgumentException("payload length must match count field blobCount.");
+    }
+    out.write(this.payload, 0, this.payload.length);
+    Objects.requireNonNull(this.pathData, "pathData");
+    for (int indexPathData = 0; indexPathData < this.pathData.length; indexPathData++) {
+      short itemPathData = this.pathData[indexPathData];
+    writeUInt8(out, itemPathData);
+    }
+    writeUInt8(out, (short) 0);
+    Objects.requireNonNull(this.reusableArrayField, "reusableArrayField");
+    if (this.reusableArrayField.length != 2) {
+      throw new IllegalArgumentException("reusableArrayField must contain exactly 2 elements.");
+    }
+    for (int indexReusableArrayField = 0; indexReusableArrayField < 2; indexReusableArrayField++) {
+      short itemReusableArrayField = this.reusableArrayField[indexReusableArrayField];
+    writeUInt8(out, itemReusableArrayField);
+    }
+    Objects.requireNonNull(this.reusableVectorField, "reusableVectorField");
+    int expectedReusableVectorFieldCount = requireCount((this.count & 0xFFFFL), "count");
+    if (this.reusableVectorField.length != expectedReusableVectorFieldCount) {
+      throw new IllegalArgumentException("reusableVectorField length must match count field count.");
+    }
+    for (int indexReusableVectorField = 0; indexReusableVectorField < this.reusableVectorField.length; indexReusableVectorField++) {
+      short itemReusableVectorField = this.reusableVectorField[indexReusableVectorField];
+    writeUInt8(out, itemReusableVectorField);
+    }
+    Objects.requireNonNull(this.reusableBlobArrayField, "reusableBlobArrayField");
+    if (this.reusableBlobArrayField.length != 16) {
+      throw new IllegalArgumentException("reusableBlobArrayField must contain exactly 16 bytes.");
+    }
+    out.write(this.reusableBlobArrayField, 0, 16);
+    Objects.requireNonNull(this.reusableBlobVectorField, "reusableBlobVectorField");
+    out.write(this.reusableBlobVectorField, 0, this.reusableBlobVectorField.length);
+    writeUInt8(out, (short) 0);
     return out.toByteArray();
   }
 
@@ -21,9 +89,9 @@ public final class Header {
    * Decodes a message instance from a byte array.
    *
    * @param bytes encoded message bytes
-   * @return decoded Header value
+   * @return decoded CollectionFrame value
    */
-  public static Header decode(byte[] bytes) {
+  public static CollectionFrame decode(byte[] bytes) {
     Objects.requireNonNull(bytes, "bytes");
     return decode(ByteBuffer.wrap(bytes));
   }
@@ -32,13 +100,63 @@ public final class Header {
    * Decodes a message instance from a byte buffer.
    *
    * @param input buffer positioned at the start of this message
-   * @return decoded Header value
+   * @return decoded CollectionFrame value
    */
-  public static Header decode(ByteBuffer input) {
+  public static CollectionFrame decode(ByteBuffer input) {
     Objects.requireNonNull(input, "input");
-    Header value = new Header();
-    value.version = readUInt8(input);
-    value.sequence = readUInt16(input, ByteOrder.LITTLE_ENDIAN);
+    CollectionFrame value = new CollectionFrame();
+    value.count = readUInt16(input, ByteOrder.BIG_ENDIAN);
+    value.blobCount = readUInt8(input);
+    value.samples = new short[4];
+    for (int indexSamples = 0; indexSamples < 4; indexSamples++) {
+      short itemSamples = readUInt8(input);
+      value.samples[indexSamples] = itemSamples;
+    }
+    int expectedEventsCount = requireCount((value.count & 0xFFFFL), "count");
+    value.events = new short[expectedEventsCount];
+    for (int indexEvents = 0; indexEvents < expectedEventsCount; indexEvents++) {
+      short itemEvents = readUInt8(input);
+      value.events[indexEvents] = itemEvents;
+    }
+    value.hash = new byte[8];
+    input.get(value.hash);
+    int expectedPayloadCount = requireCount((value.blobCount & 0xFFL), "blobCount");
+    value.payload = new byte[expectedPayloadCount];
+    input.get(value.payload);
+    ArrayList<Short> itemPathDataList = new ArrayList<>();
+    while (true) {
+      short itemPathData = readUInt8(input);
+      if (((itemPathData & 0xFFL) == 0L)) {
+        break;
+      }
+      itemPathDataList.add(itemPathData);
+    }
+    value.pathData = new short[itemPathDataList.size()];
+    for (int indexPathData = 0; indexPathData < itemPathDataList.size(); indexPathData++) {
+      value.pathData[indexPathData] = itemPathDataList.get(indexPathData);
+    }
+    value.reusableArrayField = new short[2];
+    for (int indexReusableArrayField = 0; indexReusableArrayField < 2; indexReusableArrayField++) {
+      short itemReusableArrayField = readUInt8(input);
+      value.reusableArrayField[indexReusableArrayField] = itemReusableArrayField;
+    }
+    int expectedReusableVectorFieldCount = requireCount((value.count & 0xFFFFL), "count");
+    value.reusableVectorField = new short[expectedReusableVectorFieldCount];
+    for (int indexReusableVectorField = 0; indexReusableVectorField < expectedReusableVectorFieldCount; indexReusableVectorField++) {
+      short itemReusableVectorField = readUInt8(input);
+      value.reusableVectorField[indexReusableVectorField] = itemReusableVectorField;
+    }
+    value.reusableBlobArrayField = new byte[16];
+    input.get(value.reusableBlobArrayField);
+    ByteArrayOutputStream itemReusableBlobVectorFieldBuffer = new ByteArrayOutputStream();
+    while (true) {
+      short nextByte = readUInt8(input);
+      if ((nextByte & 0xFFL) == 0L) {
+        break;
+      }
+      itemReusableBlobVectorFieldBuffer.write(nextByte & 0xFF);
+    }
+    value.reusableBlobVectorField = itemReusableBlobVectorFieldBuffer.toByteArray();
     return value;
   }
 

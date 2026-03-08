@@ -127,8 +127,8 @@ class BmsCliTest {
   }
 
   @Test
-  /** Contract: generation fails fast for members not implemented by the Java backend yet. */
-  void generateCommandReturnsSpecErrorForUnsupportedNumericMembers() {
+  /** Contract: Java generation succeeds for the numeric backend slice. */
+  void generateCommandReturnsSuccessForNumericSliceSpec() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
     ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
@@ -146,16 +146,14 @@ class BmsCliTest {
             new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
             new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
 
-    assertEquals(1, exitCode);
-    assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(Files.exists(javaOutputDir.resolve("acme/telemetry/numeric/TelemetryFrame.java")));
   }
 
   @Test
-  /** Contract: collection members and collection type refs fail with explicit diagnostics. */
-  void generateCommandReturnsSpecErrorForUnsupportedCollectionMembers() {
+  /** Contract: Java generation succeeds for the collection backend slice. */
+  void generateCommandReturnsSuccessForCollectionSliceSpec() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
     ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
@@ -173,15 +171,10 @@ class BmsCliTest {
             new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
             new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
 
-    assertEquals(1, exitCode);
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
     assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
-    assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_TYPE_REF"));
+        Files.exists(javaOutputDir.resolve("acme/telemetry/collections/CollectionFrame.java")));
   }
 
   @Test

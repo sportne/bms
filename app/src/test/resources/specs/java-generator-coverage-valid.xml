@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.coverage">
+  <float name="HalfIeee" size="f16" encoding="ieee754" comment="Half precision float"/>
+  <float name="DoubleIeee" size="f64" encoding="ieee754" comment="Double precision float"/>
+  <float name="HalfScaled" size="f16" encoding="scaled" scale="0.5" comment="Scaled half float"/>
+  <float name="DoubleScaled" size="f64" encoding="scaled" scale="0.25" comment="Scaled double float"/>
+
+  <scaledInt name="I8Scaled" baseType="int8" scale="1" comment="Signed 8-bit scaled"/>
+  <scaledInt name="U8Scaled" baseType="uint8" scale="1" comment="Unsigned 8-bit scaled"/>
+  <scaledInt name="I32Scaled" baseType="int32" scale="1" comment="Signed 32-bit scaled"/>
+  <scaledInt name="U32Scaled" baseType="uint32" scale="1" comment="Unsigned 32-bit scaled"/>
+  <scaledInt name="I64Scaled" baseType="int64" scale="1" comment="Signed 64-bit scaled"/>
+
+  <messageType
+      name="Child"
+      namespace="acme.telemetry.coverage.shared"
+      comment="Child message for collection element coverage">
+    <field name="value" type="uint8" comment="Child value"/>
+  </messageType>
+
+  <messageType name="ExtendedFrame" comment="Coverage-heavy message for Java generator branches">
+    <field name="count64" type="uint64" comment="Unsigned 64-bit count field"/>
+
+    <bitField name="status16" size="u16" comment="16-bit status">
+      <flag name="ready" position="0" comment="Ready bit"/>
+      <segment name="mode" from="1" to="2" comment="Mode segment">
+        <variant name="idle" value="0" comment="Idle"/>
+      </segment>
+    </bitField>
+    <bitField name="status32" size="u32" comment="32-bit status">
+      <flag name="running" position="0" comment="Running bit"/>
+      <segment name="channel" from="8" to="11" comment="Channel segment">
+        <variant name="primary" value="1" comment="Primary channel"/>
+      </segment>
+    </bitField>
+    <bitField name="status64" size="u64" comment="64-bit status">
+      <flag name="valid" position="0" comment="Valid bit"/>
+      <segment name="allBits" from="0" to="63" comment="Full width segment">
+        <variant name="zero" value="0" comment="All zeroes"/>
+      </segment>
+    </bitField>
+
+    <float name="halfIeeeInline" size="f16" encoding="ieee754" comment="Half IEEE inline"/>
+    <float name="doubleIeeeInline" size="f64" encoding="ieee754" comment="Double IEEE inline"/>
+    <float
+        name="halfScaledInline"
+        size="f16"
+        encoding="scaled"
+        scale="0.5"
+        comment="Half scaled inline"/>
+    <float
+        name="doubleScaledInline"
+        size="f64"
+        encoding="scaled"
+        scale="0.25"
+        comment="Double scaled inline"/>
+
+    <scaledInt name="i8ScaledInline" baseType="int8" scale="1" comment="Inline i8 scaled"/>
+    <scaledInt name="u8ScaledInline" baseType="uint8" scale="1" comment="Inline u8 scaled"/>
+    <scaledInt
+        name="i32ScaledInline"
+        baseType="int32"
+        scale="1"
+        endian="little"
+        comment="Inline i32 scaled"/>
+    <scaledInt
+        name="u32ScaledInline"
+        baseType="uint32"
+        scale="1"
+        endian="little"
+        comment="Inline u32 scaled"/>
+    <scaledInt
+        name="i64ScaledInline"
+        baseType="int64"
+        scale="1"
+        endian="big"
+        comment="Inline i64 scaled"/>
+
+    <field name="halfIeeeRef" type="HalfIeee" comment="Reusable half float"/>
+    <field name="doubleScaledRef" type="DoubleScaled" comment="Reusable scaled double float"/>
+    <field name="i32ScaledRef" type="I32Scaled" comment="Reusable i32 scaled int"/>
+
+    <array name="childArray" elementType="Child" length="2" comment="Array of child messages"/>
+    <array name="floatArray" elementType="HalfIeee" length="2" comment="Array of float refs"/>
+    <array name="scaledArray" elementType="U8Scaled" length="2" comment="Array of scaled refs"/>
+
+    <vector name="childVector" elementType="Child" comment="Counted child vector">
+      <countField ref="count64"/>
+    </vector>
+    <vector name="floatVector" elementType="DoubleIeee" comment="Counted float vector">
+      <countField ref="count64"/>
+    </vector>
+    <vector name="scaledVector" elementType="I8Scaled" comment="Counted scaled vector">
+      <countField ref="count64"/>
+    </vector>
+    <vector name="u16Terminated" elementType="uint16" comment="Terminated uint16 vector">
+      <terminatorValue value="0xFFFF"/>
+    </vector>
+    <vector name="u32Terminated" elementType="uint32" comment="Terminated uint32 vector">
+      <terminatorValue value="0xFFFFFFFF"/>
+    </vector>
+    <vector name="u64Terminated" elementType="uint64" comment="Terminated uint64 vector">
+      <terminatorValue value="0xFF"/>
+    </vector>
+    <vector name="i16Terminated" elementType="int16" comment="Terminated int16 vector">
+      <terminatorValue value="-1"/>
+    </vector>
+    <vector name="i32Terminated" elementType="int32" comment="Terminated int32 vector">
+      <terminatorValue value="-1"/>
+    </vector>
+    <vector name="i64Terminated" elementType="int64" comment="Terminated int64 vector">
+      <terminatorValue value="-1"/>
+    </vector>
+    <vector name="i8Terminated" elementType="int8" comment="Terminated signed vector">
+      <terminatorValue value="-0x1"/>
+    </vector>
+
+    <blobVector name="countedBlob" comment="Blob with uint64 count">
+      <countField ref="count64"/>
+    </blobVector>
+    <blobVector name="hexBlob" comment="Blob with bare-hex terminator">
+      <terminatorValue value="FF"/>
+    </blobVector>
+  </messageType>
+</schema>

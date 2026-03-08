@@ -1,23 +1,53 @@
 package io.github.sportne.bms.codegen.java;
 
+import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
+import io.github.sportne.bms.model.FloatEncoding;
+import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.resolved.ArrayTypeRef;
+import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
+import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
+import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.MessageTypeRef;
 import io.github.sportne.bms.model.resolved.PrimitiveType;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedArray;
+import io.github.sportne.bms.model.resolved.ResolvedBitField;
+import io.github.sportne.bms.model.resolved.ResolvedBitFlag;
+import io.github.sportne.bms.model.resolved.ResolvedBitSegment;
+import io.github.sportne.bms.model.resolved.ResolvedBitVariant;
+import io.github.sportne.bms.model.resolved.ResolvedBlobArray;
+import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
+import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
+import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
+import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
+import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
+import io.github.sportne.bms.model.resolved.ResolvedTerminatorMatch;
+import io.github.sportne.bms.model.resolved.ResolvedTerminatorNode;
+import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
 import io.github.sportne.bms.model.resolved.ResolvedTypeRef;
+import io.github.sportne.bms.model.resolved.ResolvedVector;
+import io.github.sportne.bms.model.resolved.ScaledIntTypeRef;
+import io.github.sportne.bms.model.resolved.VarStringTypeRef;
+import io.github.sportne.bms.model.resolved.VectorTypeRef;
 import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.util.Diagnostic;
 import io.github.sportne.bms.util.DiagnosticSeverity;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -26,8 +56,9 @@ import java.util.TreeSet;
 /**
  * Generates Java source files from the resolved model.
  *
- * <p>Each message type becomes one Java class. The class includes public fields and simple {@code
- * encode}/{@code decode} methods for the currently supported foundation types.
+ * <p>Each message type becomes one Java class with deterministic field declarations plus
+ * encode/decode logic. This generator currently supports foundation, numeric, and collection
+ * members.
  */
 public final class JavaCodeGenerator {
   private static final String SHARED_IO_HELPERS =
@@ -218,6 +249,116 @@ public final class JavaCodeGenerator {
       private static long readUInt64(ByteBuffer input, ByteOrder order) {
         return readInt64(input, order);
       }
+
+      /**
+       * Validates a collection count value and converts it to an int.
+       *
+       * @param countValue decoded count value as long
+       * @param fieldName field name shown in exception text
+       * @return validated count value as int
+       */
+      private static int requireCount(long countValue, String fieldName) {
+        if (countValue < 0 || countValue > Integer.MAX_VALUE) {
+          throw new IllegalArgumentException(
+              "Count field " + fieldName + " must be between 0 and Integer.MAX_VALUE.");
+        }
+        return (int) countValue;
+      }
+
+      /**
+       * Validates an unsigned-64 count and converts it to an int.
+       *
+       * @param countValue raw unsigned-64 count bits
+       * @param fieldName field name shown in exception text
+       * @return validated count value as int
+       */
+      private static int requireCountUnsignedLong(long countValue, String fieldName) {
+        if (Long.compareUnsigned(countValue, Integer.toUnsignedLong(Integer.MAX_VALUE)) > 0) {
+          throw new IllegalArgumentException(
+              "Unsigned count field "
+                  + fieldName
+                  + " must be <= Integer.MAX_VALUE. Received "
+                  + Long.toUnsignedString(countValue)
+                  + '.');
+        }
+        return (int) countValue;
+      }
+
+      /**
+       * Converts a scaled logical value to a signed integer raw value.
+       *
+       * @param logicalValue logical floating-point value
+       * @param scale scaling factor from the schema
+       * @param minInclusive signed minimum raw value
+       * @param maxInclusive signed maximum raw value
+       * @param fieldName field/member name for exception text
+       * @return rounded raw integer value
+       */
+      private static long scaleToSignedRaw(
+          double logicalValue,
+          double scale,
+          long minInclusive,
+          long maxInclusive,
+          String fieldName) {
+        if (!Double.isFinite(logicalValue)) {
+          throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+        }
+        if (scale == 0.0d || !Double.isFinite(scale)) {
+          throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+        }
+
+        double rawValue = logicalValue / scale;
+        if (!Double.isFinite(rawValue)) {
+          throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+        }
+
+        if (rawValue < minInclusive || rawValue > maxInclusive) {
+          throw new IllegalArgumentException(
+              "Value " + logicalValue + " is outside raw range for " + fieldName + '.');
+        }
+
+        long rounded = Math.round(rawValue);
+        if (rounded < minInclusive || rounded > maxInclusive) {
+          throw new IllegalArgumentException(
+              "Rounded value for " + fieldName + " is outside raw range.");
+        }
+        return rounded;
+      }
+
+      /**
+       * Converts a scaled logical value to an unsigned integer raw value.
+       *
+       * @param logicalValue logical floating-point value
+       * @param scale scaling factor from the schema
+       * @param maxInclusive unsigned maximum raw value that fits in a signed long
+       * @param fieldName field/member name for exception text
+       * @return rounded raw integer value
+       */
+      private static long scaleToUnsignedRaw(
+          double logicalValue, double scale, long maxInclusive, String fieldName) {
+        if (!Double.isFinite(logicalValue)) {
+          throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+        }
+        if (scale == 0.0d || !Double.isFinite(scale)) {
+          throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+        }
+
+        double rawValue = logicalValue / scale;
+        if (!Double.isFinite(rawValue)) {
+          throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+        }
+        if (rawValue < 0.0d || rawValue > maxInclusive) {
+          throw new IllegalArgumentException(
+              "Value " + logicalValue + " is outside unsigned raw range for " + fieldName + '.');
+        }
+
+        long rounded = Math.round(rawValue);
+        if (rounded < 0 || rounded > maxInclusive) {
+          throw new IllegalArgumentException(
+              "Rounded value for " + fieldName + " is outside unsigned raw range.");
+        }
+        return rounded;
+      }
       """
           .indent(2)
           .replace("  \n", "\n");
@@ -230,14 +371,16 @@ public final class JavaCodeGenerator {
    * @throws BmsException if generation fails
    */
   public void generate(ResolvedSchema schema, Path outputDirectory) throws BmsException {
-    Map<String, ResolvedMessageType> messageTypeByName = indexMessageTypes(schema);
+    GenerationContext generationContext = buildGenerationContext(schema);
 
     for (ResolvedMessageType messageType : schema.messageTypes()) {
       Path packageDirectory =
           outputDirectory.resolve(messageType.effectiveNamespace().replace('.', '/'));
       Path outputPath = packageDirectory.resolve(messageType.name() + ".java");
-      ensureSupportedMembers(messageType, outputPath);
-      String source = renderMessageType(messageType, messageTypeByName);
+
+      ensureSupportedMembers(messageType, generationContext, outputPath);
+
+      String source = renderMessageType(messageType, generationContext);
       try {
         Files.createDirectories(packageDirectory);
         Files.writeString(outputPath, source, StandardCharsets.UTF_8);
@@ -256,49 +399,141 @@ public final class JavaCodeGenerator {
   }
 
   /**
-   * Verifies that this generator supports every member in the message.
+   * Builds lookup maps used during Java generation.
+   *
+   * @param schema resolved schema used for generation
+   * @return generation context with deterministic lookup maps
+   */
+  private static GenerationContext buildGenerationContext(ResolvedSchema schema) {
+    return new GenerationContext(
+        mapMessages(schema.messageTypes()),
+        mapFloats(schema.reusableFloats()),
+        mapScaledInts(schema.reusableScaledInts()),
+        mapArrays(schema.reusableArrays()),
+        mapVectors(schema.reusableVectors()),
+        mapBlobArrays(schema.reusableBlobArrays()),
+        mapBlobVectors(schema.reusableBlobVectors()));
+  }
+
+  /**
+   * Builds a stable message-name lookup map.
+   *
+   * @param messageTypes resolved message types
+   * @return immutable message lookup map
+   */
+  private static Map<String, ResolvedMessageType> mapMessages(
+      List<ResolvedMessageType> messageTypes) {
+    Map<String, ResolvedMessageType> messageTypeByName = new LinkedHashMap<>();
+    for (ResolvedMessageType messageType : messageTypes) {
+      messageTypeByName.put(messageType.name(), messageType);
+    }
+    return Map.copyOf(messageTypeByName);
+  }
+
+  /**
+   * Builds a stable reusable-float lookup map.
+   *
+   * @param reusableFloats reusable float definitions
+   * @return immutable float lookup map
+   */
+  private static Map<String, ResolvedFloat> mapFloats(List<ResolvedFloat> reusableFloats) {
+    Map<String, ResolvedFloat> reusableFloatByName = new LinkedHashMap<>();
+    for (ResolvedFloat resolvedFloat : reusableFloats) {
+      reusableFloatByName.put(resolvedFloat.name(), resolvedFloat);
+    }
+    return Map.copyOf(reusableFloatByName);
+  }
+
+  /**
+   * Builds a stable reusable-scaledInt lookup map.
+   *
+   * @param reusableScaledInts reusable scaledInt definitions
+   * @return immutable scaledInt lookup map
+   */
+  private static Map<String, ResolvedScaledInt> mapScaledInts(
+      List<ResolvedScaledInt> reusableScaledInts) {
+    Map<String, ResolvedScaledInt> reusableScaledIntByName = new LinkedHashMap<>();
+    for (ResolvedScaledInt resolvedScaledInt : reusableScaledInts) {
+      reusableScaledIntByName.put(resolvedScaledInt.name(), resolvedScaledInt);
+    }
+    return Map.copyOf(reusableScaledIntByName);
+  }
+
+  /**
+   * Builds a stable reusable-array lookup map.
+   *
+   * @param reusableArrays reusable array definitions
+   * @return immutable array lookup map
+   */
+  private static Map<String, ResolvedArray> mapArrays(List<ResolvedArray> reusableArrays) {
+    Map<String, ResolvedArray> reusableArrayByName = new LinkedHashMap<>();
+    for (ResolvedArray resolvedArray : reusableArrays) {
+      reusableArrayByName.put(resolvedArray.name(), resolvedArray);
+    }
+    return Map.copyOf(reusableArrayByName);
+  }
+
+  /**
+   * Builds a stable reusable-vector lookup map.
+   *
+   * @param reusableVectors reusable vector definitions
+   * @return immutable vector lookup map
+   */
+  private static Map<String, ResolvedVector> mapVectors(List<ResolvedVector> reusableVectors) {
+    Map<String, ResolvedVector> reusableVectorByName = new LinkedHashMap<>();
+    for (ResolvedVector resolvedVector : reusableVectors) {
+      reusableVectorByName.put(resolvedVector.name(), resolvedVector);
+    }
+    return Map.copyOf(reusableVectorByName);
+  }
+
+  /**
+   * Builds a stable reusable-blobArray lookup map.
+   *
+   * @param reusableBlobArrays reusable blobArray definitions
+   * @return immutable blobArray lookup map
+   */
+  private static Map<String, ResolvedBlobArray> mapBlobArrays(
+      List<ResolvedBlobArray> reusableBlobArrays) {
+    Map<String, ResolvedBlobArray> reusableBlobArrayByName = new LinkedHashMap<>();
+    for (ResolvedBlobArray resolvedBlobArray : reusableBlobArrays) {
+      reusableBlobArrayByName.put(resolvedBlobArray.name(), resolvedBlobArray);
+    }
+    return Map.copyOf(reusableBlobArrayByName);
+  }
+
+  /**
+   * Builds a stable reusable-blobVector lookup map.
+   *
+   * @param reusableBlobVectors reusable blobVector definitions
+   * @return immutable blobVector lookup map
+   */
+  private static Map<String, ResolvedBlobVector> mapBlobVectors(
+      List<ResolvedBlobVector> reusableBlobVectors) {
+    Map<String, ResolvedBlobVector> reusableBlobVectorByName = new LinkedHashMap<>();
+    for (ResolvedBlobVector resolvedBlobVector : reusableBlobVectors) {
+      reusableBlobVectorByName.put(resolvedBlobVector.name(), resolvedBlobVector);
+    }
+    return Map.copyOf(reusableBlobVectorByName);
+  }
+
+  /**
+   * Verifies that this generator supports every member and type used by the message.
    *
    * @param messageType message being generated
+   * @param generationContext reusable lookup maps used for validation
    * @param outputPath output file path used in diagnostics
-   * @throws BmsException if unsupported members or type references are found
+   * @throws BmsException if unsupported members or references are found
    */
-  private static void ensureSupportedMembers(ResolvedMessageType messageType, Path outputPath)
+  private static void ensureSupportedMembers(
+      ResolvedMessageType messageType, GenerationContext generationContext, Path outputPath)
       throws BmsException {
-    List<Diagnostic> diagnostics = new java.util.ArrayList<>();
-    for (ResolvedMessageMember member : messageType.members()) {
-      if (!(member instanceof ResolvedField field)) {
-        diagnostics.add(
-            new Diagnostic(
-                DiagnosticSeverity.ERROR,
-                "GENERATOR_JAVA_UNSUPPORTED_MEMBER",
-                "Java generator does not support message member type "
-                    + member.getClass().getSimpleName()
-                    + " in message "
-                    + messageType.name()
-                    + " yet.",
-                outputPath.toString(),
-                -1,
-                -1));
-        continue;
-      }
+    List<Diagnostic> diagnostics = new ArrayList<>();
+    Map<String, PrimitiveType> primitiveFieldByName = primitiveFieldsByName(messageType);
 
-      if (!(field.typeRef() instanceof PrimitiveTypeRef)
-          && !(field.typeRef() instanceof MessageTypeRef)) {
-        diagnostics.add(
-            new Diagnostic(
-                DiagnosticSeverity.ERROR,
-                "GENERATOR_JAVA_UNSUPPORTED_TYPE_REF",
-                "Java generator does not support field type reference "
-                    + field.typeRef().getClass().getSimpleName()
-                    + " for field "
-                    + field.name()
-                    + " in message "
-                    + messageType.name()
-                    + " yet.",
-                outputPath.toString(),
-                -1,
-                -1));
-      }
+    for (ResolvedMessageMember member : messageType.members()) {
+      checkMemberSupport(
+          member, messageType, generationContext, primitiveFieldByName, outputPath, diagnostics);
     }
 
     if (!diagnostics.isEmpty()) {
@@ -308,73 +543,1931 @@ public final class JavaCodeGenerator {
   }
 
   /**
-   * Builds a stable lookup map from message type name to resolved message object.
+   * Builds a map from primitive field name to primitive type for one message.
    *
-   * @param schema resolved schema that contains message types
-   * @return immutable map keyed by message type name
+   * @param messageType resolved message type
+   * @return primitive field lookup map
    */
-  private static Map<String, ResolvedMessageType> indexMessageTypes(ResolvedSchema schema) {
-    Map<String, ResolvedMessageType> messageTypeByName = new LinkedHashMap<>();
-    for (ResolvedMessageType messageType : schema.messageTypes()) {
-      messageTypeByName.put(messageType.name(), messageType);
+  private static Map<String, PrimitiveType> primitiveFieldsByName(ResolvedMessageType messageType) {
+    Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
+    for (ResolvedMessageMember member : messageType.members()) {
+      if (member instanceof ResolvedField resolvedField
+          && resolvedField.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
+        primitiveFieldByName.put(resolvedField.name(), primitiveTypeRef.primitiveType());
+      }
     }
-    return Map.copyOf(messageTypeByName);
+    return Map.copyOf(primitiveFieldByName);
   }
 
   /**
-   * Renders one complete Java class source file for a resolved message type.
+   * Checks support for one message member.
+   *
+   * @param member message member to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkMemberSupport(
+      ResolvedMessageMember member,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (member instanceof ResolvedField resolvedField) {
+      checkFieldTypeSupport(
+          resolvedField,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedBitField) {
+      return;
+    }
+    if (member instanceof ResolvedFloat resolvedFloat) {
+      checkFloatSupport(resolvedFloat, messageType, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
+      checkScaledIntSupport(resolvedScaledInt, messageType, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedArray resolvedArray) {
+      checkArraySupport(resolvedArray, messageType, generationContext, outputPath, diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedVector resolvedVector) {
+      checkVectorSupport(
+          resolvedVector,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+      return;
+    }
+    if (member instanceof ResolvedBlobArray) {
+      return;
+    }
+    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
+      checkBlobVectorSupport(
+          resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+      return;
+    }
+
+    diagnostics.add(
+        unsupportedMemberDiagnostic(
+            messageType.name(), member.getClass().getSimpleName(), outputPath.toString()));
+  }
+
+  /**
+   * Checks support for a resolved field member and its referenced type.
+   *
+   * @param resolvedField field to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkFieldTypeSupport(
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    ResolvedTypeRef typeRef = resolvedField.typeRef();
+    if (typeRef instanceof PrimitiveTypeRef || typeRef instanceof MessageTypeRef) {
+      return;
+    }
+
+    if (typeRef instanceof FloatTypeRef floatTypeRef) {
+      ResolvedFloat resolvedFloat =
+          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+      if (resolvedFloat == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable float was not found: " + floatTypeRef.floatTypeName()));
+        return;
+      }
+      checkFloatSupport(resolvedFloat, messageType, outputPath, diagnostics);
+      return;
+    }
+
+    if (typeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
+      ResolvedScaledInt resolvedScaledInt =
+          generationContext.reusableScaledIntByName().get(scaledIntTypeRef.scaledIntTypeName());
+      if (resolvedScaledInt == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable scaledInt was not found: " + scaledIntTypeRef.scaledIntTypeName()));
+        return;
+      }
+      checkScaledIntSupport(resolvedScaledInt, messageType, outputPath, diagnostics);
+      return;
+    }
+
+    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
+      ResolvedArray resolvedArray =
+          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+      if (resolvedArray == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable array was not found: " + arrayTypeRef.arrayTypeName()));
+        return;
+      }
+      checkArraySupport(resolvedArray, messageType, generationContext, outputPath, diagnostics);
+      return;
+    }
+
+    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
+      ResolvedVector resolvedVector =
+          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+      if (resolvedVector == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable vector was not found: " + vectorTypeRef.vectorTypeName()));
+        return;
+      }
+      checkVectorSupport(
+          resolvedVector,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+      return;
+    }
+
+    if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
+      if (!generationContext
+          .reusableBlobArrayByName()
+          .containsKey(blobArrayTypeRef.blobArrayTypeName())) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable blobArray was not found: " + blobArrayTypeRef.blobArrayTypeName()));
+      }
+      return;
+    }
+
+    if (typeRef instanceof BlobVectorTypeRef blobVectorTypeRef) {
+      ResolvedBlobVector resolvedBlobVector =
+          generationContext.reusableBlobVectorByName().get(blobVectorTypeRef.blobVectorTypeName());
+      if (resolvedBlobVector == null) {
+        diagnostics.add(
+            unsupportedTypeRefDiagnostic(
+                messageType.name(),
+                resolvedField.name(),
+                typeRef.getClass().getSimpleName(),
+                outputPath.toString(),
+                "Reusable blobVector was not found: " + blobVectorTypeRef.blobVectorTypeName()));
+      } else {
+        checkBlobVectorSupport(
+            resolvedBlobVector, messageType, primitiveFieldByName, outputPath, diagnostics);
+      }
+      return;
+    }
+
+    diagnostics.add(
+        unsupportedTypeRefDiagnostic(
+            messageType.name(),
+            resolvedField.name(),
+            typeRef.getClass().getSimpleName(),
+            outputPath.toString(),
+            "This type reference is not implemented in the Java backend yet."));
+  }
+
+  /**
+   * Checks support for one float definition.
+   *
+   * @param resolvedFloat float definition to validate
+   * @param messageType parent message type
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkFloatSupport(
+      ResolvedFloat resolvedFloat,
+      ResolvedMessageType messageType,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (resolvedFloat.encoding() == FloatEncoding.SCALED && resolvedFloat.size() == FloatSize.F16) {
+      return;
+    }
+    if (resolvedFloat.encoding() == FloatEncoding.SCALED && resolvedFloat.size() == FloatSize.F32) {
+      return;
+    }
+    if (resolvedFloat.encoding() == FloatEncoding.SCALED && resolvedFloat.size() == FloatSize.F64) {
+      return;
+    }
+    if (resolvedFloat.encoding() == FloatEncoding.IEEE754) {
+      return;
+    }
+
+    diagnostics.add(
+        unsupportedMemberDiagnostic(
+            messageType.name(),
+            "ResolvedFloat(" + resolvedFloat.encoding() + ", " + resolvedFloat.size() + ")",
+            outputPath.toString()));
+  }
+
+  /**
+   * Checks support for one scaled-int definition.
+   *
+   * @param resolvedScaledInt scaledInt definition to validate
+   * @param messageType parent message type
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkScaledIntSupport(
+      ResolvedScaledInt resolvedScaledInt,
+      ResolvedMessageType messageType,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (resolvedScaledInt.baseType() == PrimitiveType.UINT64) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(), "ResolvedScaledInt(baseType=UINT64)", outputPath.toString()));
+    }
+  }
+
+  /**
+   * Checks support for one array definition.
+   *
+   * @param resolvedArray array definition to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkArraySupport(
+      ResolvedArray resolvedArray,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!isCollectionElementTypeSupported(resolvedArray.elementTypeRef(), generationContext)) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "ResolvedArray(elementType="
+                  + resolvedArray.elementTypeRef().getClass().getSimpleName()
+                  + ")",
+              outputPath.toString()));
+    }
+  }
+
+  /**
+   * Checks support for one vector definition.
+   *
+   * @param resolvedVector vector definition to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkVectorSupport(
+      ResolvedVector resolvedVector,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!isCollectionElementTypeSupported(resolvedVector.elementTypeRef(), generationContext)) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "ResolvedVector(elementType="
+                  + resolvedVector.elementTypeRef().getClass().getSimpleName()
+                  + ")",
+              outputPath.toString()));
+      return;
+    }
+
+    checkLengthModeSupport(
+        resolvedVector.lengthMode(),
+        resolvedVector.elementTypeRef(),
+        messageType,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics,
+        "vector " + resolvedVector.name());
+  }
+
+  /**
+   * Checks support for one blob-vector definition.
+   *
+   * @param resolvedBlobVector blob-vector definition to validate
+   * @param messageType parent message type
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkBlobVectorSupport(
+      ResolvedBlobVector resolvedBlobVector,
+      ResolvedMessageType messageType,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    checkLengthModeSupport(
+        resolvedBlobVector.lengthMode(),
+        new PrimitiveTypeRef(PrimitiveType.UINT8),
+        messageType,
+        primitiveFieldByName,
+        outputPath,
+        diagnostics,
+        "blobVector " + resolvedBlobVector.name());
+  }
+
+  /**
+   * Checks support for one length mode.
+   *
+   * @param lengthMode length mode to validate
+   * @param elementTypeRef vector/blob element type
+   * @param messageType parent message type
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @param ownerName owner name used in diagnostic messages
+   */
+  private static void checkLengthModeSupport(
+      ResolvedLengthMode lengthMode,
+      ResolvedTypeRef elementTypeRef,
+      ResolvedMessageType messageType,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics,
+      String ownerName) {
+    if (lengthMode instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      if (!primitiveFieldByName.containsKey(resolvedCountFieldLength.ref())) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                ownerName + "(countField ref=\"" + resolvedCountFieldLength.ref() + "\")",
+                outputPath.toString()));
+      }
+      return;
+    }
+
+    if (lengthMode instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
+      validatePrimitiveTerminatorLiteral(
+          elementTypeRef,
+          resolvedTerminatorValueLength.value(),
+          messageType,
+          outputPath,
+          diagnostics,
+          ownerName);
+      return;
+    }
+
+    String terminatorLiteral = terminatorLiteral(((ResolvedTerminatorField) lengthMode).next());
+    if (terminatorLiteral == null) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              ownerName + "(terminatorField path missing terminatorMatch)",
+              outputPath.toString()));
+      return;
+    }
+
+    validatePrimitiveTerminatorLiteral(
+        elementTypeRef, terminatorLiteral, messageType, outputPath, diagnostics, ownerName);
+  }
+
+  /**
+   * Checks that a terminator literal is supported for a primitive element type.
+   *
+   * @param elementTypeRef element type of the vector/blob
+   * @param literal terminator literal text
+   * @param messageType parent message type
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @param ownerName owner name used in diagnostic messages
+   */
+  private static void validatePrimitiveTerminatorLiteral(
+      ResolvedTypeRef elementTypeRef,
+      String literal,
+      ResolvedMessageType messageType,
+      Path outputPath,
+      List<Diagnostic> diagnostics,
+      String ownerName) {
+    if (!(elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef)) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              ownerName + "(terminator modes require primitive element types)",
+              outputPath.toString()));
+      return;
+    }
+
+    try {
+      BigInteger numericLiteral = parseNumericLiteral(literal);
+      if (!fitsPrimitiveRange(numericLiteral, primitiveTypeRef.primitiveType())) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                messageType.name(),
+                ownerName + "(terminator literal out of range: " + literal + ")",
+                outputPath.toString()));
+      }
+    } catch (NumberFormatException exception) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              ownerName + "(invalid terminator literal: " + literal + ")",
+              outputPath.toString()));
+    }
+  }
+
+  /**
+   * Determines whether a collection element type is supported in this backend milestone.
+   *
+   * @param elementTypeRef element type reference to check
+   * @param generationContext reusable lookup maps
+   * @return {@code true} when the element type can be emitted
+   */
+  private static boolean isCollectionElementTypeSupported(
+      ResolvedTypeRef elementTypeRef, GenerationContext generationContext) {
+    if (elementTypeRef instanceof PrimitiveTypeRef || elementTypeRef instanceof MessageTypeRef) {
+      return true;
+    }
+
+    if (elementTypeRef instanceof FloatTypeRef floatTypeRef) {
+      return generationContext.reusableFloatByName().containsKey(floatTypeRef.floatTypeName());
+    }
+
+    if (elementTypeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
+      ResolvedScaledInt resolvedScaledInt =
+          generationContext.reusableScaledIntByName().get(scaledIntTypeRef.scaledIntTypeName());
+      return resolvedScaledInt != null && resolvedScaledInt.baseType() != PrimitiveType.UINT64;
+    }
+
+    return false;
+  }
+
+  /**
+   * Creates one unsupported-member diagnostic.
+   *
+   * @param messageName parent message name
+   * @param memberLabel unsupported member label
+   * @param outputPath output path shown in diagnostics
+   * @return unsupported-member diagnostic
+   */
+  private static Diagnostic unsupportedMemberDiagnostic(
+      String messageName, String memberLabel, String outputPath) {
+    return new Diagnostic(
+        DiagnosticSeverity.ERROR,
+        "GENERATOR_JAVA_UNSUPPORTED_MEMBER",
+        "Java generator does not support message member "
+            + memberLabel
+            + " in message "
+            + messageName
+            + " yet.",
+        outputPath,
+        -1,
+        -1);
+  }
+
+  /**
+   * Creates one unsupported-type-reference diagnostic.
+   *
+   * @param messageName parent message name
+   * @param fieldName field name that owns the reference
+   * @param referenceKind reference kind label
+   * @param outputPath output path shown in diagnostics
+   * @param reason additional reason text
+   * @return unsupported-type-reference diagnostic
+   */
+  private static Diagnostic unsupportedTypeRefDiagnostic(
+      String messageName,
+      String fieldName,
+      String referenceKind,
+      String outputPath,
+      String reason) {
+    return new Diagnostic(
+        DiagnosticSeverity.ERROR,
+        "GENERATOR_JAVA_UNSUPPORTED_TYPE_REF",
+        "Java generator does not support field type reference "
+            + referenceKind
+            + " for field "
+            + fieldName
+            + " in message "
+            + messageName
+            + " yet. "
+            + reason,
+        outputPath,
+        -1,
+        -1);
+  }
+
+  /**
+   * Renders one complete Java class source file.
    *
    * @param messageType message type to render
-   * @param messageTypeByName lookup for resolving cross-message references
+   * @param generationContext reusable lookup maps
    * @return generated Java source text
    */
   private static String renderMessageType(
-      ResolvedMessageType messageType, Map<String, ResolvedMessageType> messageTypeByName) {
+      ResolvedMessageType messageType, GenerationContext generationContext) {
     StringBuilder builder = new StringBuilder();
 
     builder.append("package ").append(messageType.effectiveNamespace()).append(";\n\n");
+    appendImports(builder, messageType, generationContext);
 
+    builder.append("public final class ").append(messageType.name()).append(" {\n");
+
+    appendMemberDeclarations(builder, messageType, generationContext);
+    appendBitFieldHelpers(builder, messageType);
+    appendEncodeMethod(builder, messageType, generationContext);
+    appendDecodeMethods(builder, messageType, generationContext);
+
+    builder.append(SHARED_IO_HELPERS);
+    builder.append("}\n");
+
+    return builder.toString();
+  }
+
+  /**
+   * Appends import lines required by one generated message class.
+   *
+   * @param builder destination source builder
+   * @param messageType message being rendered
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendImports(
+      StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
     Set<String> imports = new TreeSet<>();
     imports.add("java.io.ByteArrayOutputStream");
     imports.add("java.nio.ByteBuffer");
     imports.add("java.nio.ByteOrder");
+    imports.add("java.util.ArrayList");
     imports.add("java.util.Objects");
 
-    for (ResolvedField field : messageType.fields()) {
-      if (field.typeRef() instanceof MessageTypeRef messageTypeRef) {
-        ResolvedMessageType referenced = messageTypeByName.get(messageTypeRef.messageTypeName());
-        if (referenced != null
-            && !Objects.equals(referenced.effectiveNamespace(), messageType.effectiveNamespace())) {
-          imports.add(referenced.effectiveNamespace() + "." + referenced.name());
-        }
-      }
-    }
+    collectMessageImports(imports, messageType, generationContext);
 
     for (String javaImport : imports) {
       builder.append("import ").append(javaImport).append(";\n");
     }
     builder.append("\n");
+  }
 
-    builder.append("public final class ").append(messageType.name()).append(" {\n");
+  /**
+   * Collects message-type imports referenced by this message.
+   *
+   * @param imports destination import set
+   * @param messageType message being rendered
+   * @param generationContext reusable lookup maps
+   */
+  private static void collectMessageImports(
+      Set<String> imports, ResolvedMessageType messageType, GenerationContext generationContext) {
+    for (ResolvedMessageMember member : messageType.members()) {
+      if (member instanceof ResolvedField resolvedField) {
+        collectMessageImportsFromTypeRef(
+            imports, resolvedField.typeRef(), messageType.effectiveNamespace(), generationContext);
+      }
+      if (member instanceof ResolvedArray resolvedArray) {
+        collectMessageImportsFromTypeRef(
+            imports,
+            resolvedArray.elementTypeRef(),
+            messageType.effectiveNamespace(),
+            generationContext);
+      }
+      if (member instanceof ResolvedVector resolvedVector) {
+        collectMessageImportsFromTypeRef(
+            imports,
+            resolvedVector.elementTypeRef(),
+            messageType.effectiveNamespace(),
+            generationContext);
+      }
+    }
+  }
 
-    for (ResolvedField field : messageType.fields()) {
+  /**
+   * Collects imports required by one type reference.
+   *
+   * @param imports destination import set
+   * @param typeRef type reference to inspect
+   * @param currentNamespace namespace of the current generated message
+   * @param generationContext reusable lookup maps
+   */
+  private static void collectMessageImportsFromTypeRef(
+      Set<String> imports,
+      ResolvedTypeRef typeRef,
+      String currentNamespace,
+      GenerationContext generationContext) {
+    if (typeRef instanceof MessageTypeRef messageTypeRef) {
+      ResolvedMessageType referenced =
+          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
+      if (referenced != null
+          && !Objects.equals(referenced.effectiveNamespace(), currentNamespace)) {
+        imports.add(referenced.effectiveNamespace() + "." + referenced.name());
+      }
+      return;
+    }
+
+    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
+      ResolvedArray resolvedArray =
+          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+      if (resolvedArray != null) {
+        collectMessageImportsFromTypeRef(
+            imports, resolvedArray.elementTypeRef(), currentNamespace, generationContext);
+      }
+      return;
+    }
+
+    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
+      ResolvedVector resolvedVector =
+          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+      if (resolvedVector != null) {
+        collectMessageImportsFromTypeRef(
+            imports, resolvedVector.elementTypeRef(), currentNamespace, generationContext);
+      }
+    }
+  }
+
+  /**
+   * Appends field declarations for message members.
+   *
+   * @param builder destination source builder
+   * @param messageType message being rendered
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendMemberDeclarations(
+      StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
+    for (ResolvedMessageMember member : messageType.members()) {
       builder
           .append("  public ")
-          .append(toJavaType(field.typeRef(), messageTypeByName))
+          .append(javaTypeForMember(member, generationContext))
           .append(' ')
-          .append(field.name())
+          .append(memberName(member))
           .append(";\n");
     }
-
     builder.append("\n");
+  }
+
+  /**
+   * Resolves Java declaration type for one member.
+   *
+   * @param member member to inspect
+   * @param generationContext reusable lookup maps
+   * @return Java declaration type
+   */
+  private static String javaTypeForMember(
+      ResolvedMessageMember member, GenerationContext generationContext) {
+    if (member instanceof ResolvedField resolvedField) {
+      return javaTypeForTypeRef(resolvedField.typeRef(), generationContext);
+    }
+    if (member instanceof ResolvedBitField resolvedBitField) {
+      return javaTypeForBitFieldSize(resolvedBitField.size());
+    }
+    if (member instanceof ResolvedFloat || member instanceof ResolvedScaledInt) {
+      return "double";
+    }
+    if (member instanceof ResolvedArray resolvedArray) {
+      return javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext) + "[]";
+    }
+    if (member instanceof ResolvedVector resolvedVector) {
+      return javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext)
+          + "[]";
+    }
+    if (member instanceof ResolvedBlobArray || member instanceof ResolvedBlobVector) {
+      return "byte[]";
+    }
+    throw new IllegalStateException(
+        "Unsupported member type: " + member.getClass().getSimpleName());
+  }
+
+  /**
+   * Resolves Java declaration type for one type reference.
+   *
+   * @param typeRef type reference to inspect
+   * @param generationContext reusable lookup maps
+   * @return Java declaration type
+   */
+  private static String javaTypeForTypeRef(
+      ResolvedTypeRef typeRef, GenerationContext generationContext) {
+    if (typeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
+      return primitiveTypeRef.primitiveType().javaTypeName();
+    }
+    if (typeRef instanceof MessageTypeRef messageTypeRef) {
+      ResolvedMessageType referenced =
+          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
+      return referenced == null ? messageTypeRef.messageTypeName() : referenced.name();
+    }
+    if (typeRef instanceof FloatTypeRef || typeRef instanceof ScaledIntTypeRef) {
+      return "double";
+    }
+    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
+      ResolvedArray resolvedArray =
+          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+      if (resolvedArray == null) {
+        throw new IllegalStateException("Missing reusable array: " + arrayTypeRef.arrayTypeName());
+      }
+      return javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext) + "[]";
+    }
+    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
+      ResolvedVector resolvedVector =
+          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+      if (resolvedVector == null) {
+        throw new IllegalStateException(
+            "Missing reusable vector: " + vectorTypeRef.vectorTypeName());
+      }
+      return javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext)
+          + "[]";
+    }
+    if (typeRef instanceof BlobArrayTypeRef || typeRef instanceof BlobVectorTypeRef) {
+      return "byte[]";
+    }
+    if (typeRef instanceof VarStringTypeRef) {
+      throw new IllegalStateException("varString type refs are deferred in this milestone.");
+    }
+    throw new IllegalStateException(
+        "Unsupported type reference: " + typeRef.getClass().getSimpleName());
+  }
+
+  /**
+   * Resolves Java element type for collection members.
+   *
+   * @param elementTypeRef collection element type reference
+   * @param generationContext reusable lookup maps
+   * @return Java type used for one collection element
+   */
+  private static String javaElementTypeForCollection(
+      ResolvedTypeRef elementTypeRef, GenerationContext generationContext) {
+    if (elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
+      return primitiveTypeRef.primitiveType().javaTypeName();
+    }
+    if (elementTypeRef instanceof MessageTypeRef messageTypeRef) {
+      ResolvedMessageType referenced =
+          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
+      return referenced == null ? messageTypeRef.messageTypeName() : referenced.name();
+    }
+    if (elementTypeRef instanceof FloatTypeRef || elementTypeRef instanceof ScaledIntTypeRef) {
+      return "double";
+    }
+    throw new IllegalStateException(
+        "Unsupported collection element type: " + elementTypeRef.getClass().getSimpleName());
+  }
+
+  /**
+   * Resolves one member name.
+   *
+   * @param member member to inspect
+   * @return member name
+   */
+  private static String memberName(ResolvedMessageMember member) {
+    if (member instanceof ResolvedField resolvedField) {
+      return resolvedField.name();
+    }
+    if (member instanceof ResolvedBitField resolvedBitField) {
+      return resolvedBitField.name();
+    }
+    if (member instanceof ResolvedFloat resolvedFloat) {
+      return resolvedFloat.name();
+    }
+    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
+      return resolvedScaledInt.name();
+    }
+    if (member instanceof ResolvedArray resolvedArray) {
+      return resolvedArray.name();
+    }
+    if (member instanceof ResolvedVector resolvedVector) {
+      return resolvedVector.name();
+    }
+    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
+      return resolvedBlobArray.name();
+    }
+    if (member instanceof ResolvedBlobVector resolvedBlobVector) {
+      return resolvedBlobVector.name();
+    }
+    throw new IllegalStateException(
+        "Unsupported member type: " + member.getClass().getSimpleName());
+  }
+
+  /**
+   * Resolves Java declaration type for bitField storage size.
+   *
+   * @param bitFieldSize bitField size
+   * @return Java type used to store the raw bit container
+   */
+  private static String javaTypeForBitFieldSize(BitFieldSize bitFieldSize) {
+    return switch (bitFieldSize) {
+      case U8 -> "short";
+      case U16 -> "int";
+      case U32 -> "long";
+      case U64 -> "long";
+    };
+  }
+
+  /**
+   * Appends helper methods for each bitField member.
+   *
+   * @param builder destination source builder
+   * @param messageType message being rendered
+   */
+  private static void appendBitFieldHelpers(
+      StringBuilder builder, ResolvedMessageType messageType) {
+    for (ResolvedMessageMember member : messageType.members()) {
+      if (member instanceof ResolvedBitField resolvedBitField) {
+        appendBitFieldRawHelpers(builder, resolvedBitField);
+        appendBitFieldFlagHelpers(builder, resolvedBitField);
+        appendBitFieldSegmentHelpers(builder, resolvedBitField);
+      }
+    }
+  }
+
+  /**
+   * Appends raw getter/setter helpers for one bitField.
+   *
+   * @param builder destination source builder
+   * @param resolvedBitField bitField to render
+   */
+  private static void appendBitFieldRawHelpers(
+      StringBuilder builder, ResolvedBitField resolvedBitField) {
+    String pascalName = toPascalCase(resolvedBitField.name());
+
+    builder
+        .append("  private long get")
+        .append(pascalName)
+        .append("Raw() {\n")
+        .append("    return ")
+        .append(
+            bitFieldRawReadExpression("this." + resolvedBitField.name(), resolvedBitField.size()))
+        .append(";\n")
+        .append("  }\n\n");
+
+    builder
+        .append("  private void set")
+        .append(pascalName)
+        .append("Raw(long raw) {\n")
+        .append("    ")
+        .append(
+            bitFieldRawWriteStatement(
+                "this." + resolvedBitField.name(), "raw", resolvedBitField.size()))
+        .append("\n")
+        .append("  }\n\n");
+  }
+
+  /**
+   * Appends flag accessors for one bitField.
+   *
+   * @param builder destination source builder
+   * @param resolvedBitField bitField to render
+   */
+  private static void appendBitFieldFlagHelpers(
+      StringBuilder builder, ResolvedBitField resolvedBitField) {
+    String bitFieldPascalName = toPascalCase(resolvedBitField.name());
+    for (ResolvedBitFlag resolvedBitFlag : resolvedBitField.flags()) {
+      String flagPascalName = toPascalCase(resolvedBitFlag.name());
+      long mask = 1L << resolvedBitFlag.position();
+
+      builder
+          .append("  public boolean is")
+          .append(bitFieldPascalName)
+          .append(flagPascalName)
+          .append("() {\n")
+          .append("    return (get")
+          .append(bitFieldPascalName)
+          .append("Raw() & ")
+          .append(mask)
+          .append("L) != 0L;\n")
+          .append("  }\n\n");
+
+      builder
+          .append("  public void set")
+          .append(bitFieldPascalName)
+          .append(flagPascalName)
+          .append("(boolean enabled) {\n")
+          .append("    long raw = get")
+          .append(bitFieldPascalName)
+          .append("Raw();\n")
+          .append("    if (enabled) {\n")
+          .append("      raw |= ")
+          .append(mask)
+          .append("L;\n")
+          .append("    } else {\n")
+          .append("      raw &= ~")
+          .append(mask)
+          .append("L;\n")
+          .append("    }\n")
+          .append("    set")
+          .append(bitFieldPascalName)
+          .append("Raw(raw);\n")
+          .append("  }\n\n");
+    }
+  }
+
+  /**
+   * Appends segment and variant helpers for one bitField.
+   *
+   * @param builder destination source builder
+   * @param resolvedBitField bitField to render
+   */
+  private static void appendBitFieldSegmentHelpers(
+      StringBuilder builder, ResolvedBitField resolvedBitField) {
+    String bitFieldPascalName = toPascalCase(resolvedBitField.name());
+
+    for (ResolvedBitSegment resolvedBitSegment : resolvedBitField.segments()) {
+      String segmentPascalName = toPascalCase(resolvedBitSegment.name());
+      int width = resolvedBitSegment.toBit() - resolvedBitSegment.fromBit() + 1;
+      long mask = width == 64 ? -1L : (1L << width) - 1L;
+
+      for (ResolvedBitVariant resolvedBitVariant : resolvedBitSegment.variants()) {
+        builder
+            .append("  public static final long ")
+            .append(variantConstantName(resolvedBitField, resolvedBitSegment, resolvedBitVariant))
+            .append(" = ")
+            .append(resolvedBitVariant.value())
+            .append("L;\n");
+      }
+      if (!resolvedBitSegment.variants().isEmpty()) {
+        builder.append("\n");
+      }
+
+      builder
+          .append("  public long get")
+          .append(bitFieldPascalName)
+          .append(segmentPascalName)
+          .append("() {\n")
+          .append("    long raw = get")
+          .append(bitFieldPascalName)
+          .append("Raw();\n")
+          .append("    return (raw >>> ")
+          .append(resolvedBitSegment.fromBit())
+          .append(") & ")
+          .append(mask)
+          .append("L;\n")
+          .append("  }\n\n");
+
+      builder
+          .append("  public void set")
+          .append(bitFieldPascalName)
+          .append(segmentPascalName)
+          .append("(long value) {\n")
+          .append("    if (value < 0L || value > ")
+          .append(mask)
+          .append("L) {\n")
+          .append("      throw new IllegalArgumentException(\"Segment ")
+          .append(resolvedBitSegment.name())
+          .append(" in bitField ")
+          .append(resolvedBitField.name())
+          .append(" must be in [0, ")
+          .append(mask)
+          .append("]\");\n")
+          .append("    }\n")
+          .append("    long raw = get")
+          .append(bitFieldPascalName)
+          .append("Raw();\n")
+          .append("    long clearMask = ~(")
+          .append(mask)
+          .append("L << ")
+          .append(resolvedBitSegment.fromBit())
+          .append(");\n")
+          .append("    raw = (raw & clearMask) | ((value & ")
+          .append(mask)
+          .append("L) << ")
+          .append(resolvedBitSegment.fromBit())
+          .append(");\n")
+          .append("    set")
+          .append(bitFieldPascalName)
+          .append("Raw(raw);\n")
+          .append("  }\n\n");
+    }
+  }
+
+  /**
+   * Builds one variant constant name.
+   *
+   * @param resolvedBitField owning bitField
+   * @param resolvedBitSegment owning segment
+   * @param resolvedBitVariant variant value
+   * @return stable uppercase constant name
+   */
+  private static String variantConstantName(
+      ResolvedBitField resolvedBitField,
+      ResolvedBitSegment resolvedBitSegment,
+      ResolvedBitVariant resolvedBitVariant) {
+    return (resolvedBitField.name()
+            + "_"
+            + resolvedBitSegment.name()
+            + "_"
+            + resolvedBitVariant.name())
+        .replaceAll("[^A-Za-z0-9]+", "_")
+        .toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * Converts a member name to PascalCase for generated accessor methods.
+   *
+   * @param value original identifier
+   * @return PascalCase representation
+   */
+  private static String toPascalCase(String value) {
+    String[] parts = value.split("[^A-Za-z0-9]+");
+    StringBuilder builder = new StringBuilder();
+    for (String part : parts) {
+      if (part.isEmpty()) {
+        continue;
+      }
+      builder.append(Character.toUpperCase(part.charAt(0)));
+      if (part.length() > 1) {
+        builder.append(part.substring(1));
+      }
+    }
+    return builder.length() == 0 ? value : builder.toString();
+  }
+
+  /**
+   * Builds an expression that reads raw bits from one bitField storage variable.
+   *
+   * @param fieldExpression field expression to read
+   * @param bitFieldSize bitField storage size
+   * @return Java expression that produces unsigned raw bits as a long
+   */
+  private static String bitFieldRawReadExpression(
+      String fieldExpression, BitFieldSize bitFieldSize) {
+    return switch (bitFieldSize) {
+      case U8 -> "(" + fieldExpression + " & 0xFFL)";
+      case U16 -> "(" + fieldExpression + " & 0xFFFFL)";
+      case U32 -> "(" + fieldExpression + " & 0xFFFFFFFFL)";
+      case U64 -> fieldExpression;
+    };
+  }
+
+  /**
+   * Builds a statement that writes raw bits back to one bitField storage variable.
+   *
+   * @param fieldExpression field expression to assign
+   * @param rawExpression expression that contains raw bits
+   * @param bitFieldSize bitField storage size
+   * @return Java assignment statement without trailing newline
+   */
+  private static String bitFieldRawWriteStatement(
+      String fieldExpression, String rawExpression, BitFieldSize bitFieldSize) {
+    return switch (bitFieldSize) {
+      case U8 -> fieldExpression + " = (short) (" + rawExpression + " & 0xFFL);";
+      case U16 -> fieldExpression + " = (int) (" + rawExpression + " & 0xFFFFL);";
+      case U32 -> fieldExpression + " = " + rawExpression + " & 0xFFFFFFFFL;";
+      case U64 -> fieldExpression + " = " + rawExpression + ";";
+    };
+  }
+
+  /**
+   * Appends encode method implementation.
+   *
+   * @param builder destination source builder
+   * @param messageType message being rendered
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendEncodeMethod(
+      StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
+    Map<String, PrimitiveType> primitiveFieldByName = primitiveFieldsByName(messageType);
+
     builder.append("  public byte[] encode() {\n");
     builder.append("    ByteArrayOutputStream out = new ByteArrayOutputStream();\n");
-    for (ResolvedField field : messageType.fields()) {
-      appendEncodeLine(builder, field, messageTypeByName);
+
+    for (ResolvedMessageMember member : messageType.members()) {
+      appendEncodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
     }
+
     builder.append("    return out.toByteArray();\n");
     builder.append("  }\n\n");
+  }
 
+  /**
+   * Appends encode statements for one member.
+   *
+   * @param builder destination source builder
+   * @param member member to encode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendEncodeMember(
+      StringBuilder builder,
+      ResolvedMessageMember member,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    if (member instanceof ResolvedField resolvedField) {
+      appendEncodeField(
+          builder, resolvedField, messageType, generationContext, primitiveFieldByName);
+      return;
+    }
+    if (member instanceof ResolvedBitField resolvedBitField) {
+      appendEncodeBitField(builder, resolvedBitField);
+      return;
+    }
+    if (member instanceof ResolvedFloat resolvedFloat) {
+      appendEncodeFloat(
+          builder, "this." + resolvedFloat.name(), resolvedFloat, resolvedFloat.name());
+      return;
+    }
+    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
+      appendEncodeScaledInt(
+          builder, "this." + resolvedScaledInt.name(), resolvedScaledInt, resolvedScaledInt.name());
+      return;
+    }
+    if (member instanceof ResolvedArray resolvedArray) {
+      appendEncodeArray(
+          builder,
+          "this." + resolvedArray.name(),
+          resolvedArray,
+          resolvedArray.name(),
+          generationContext);
+      return;
+    }
+    if (member instanceof ResolvedVector resolvedVector) {
+      appendEncodeVector(
+          builder,
+          "this." + resolvedVector.name(),
+          resolvedVector,
+          resolvedVector.name(),
+          generationContext,
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
+    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
+      appendEncodeBlobArray(
+          builder, "this." + resolvedBlobArray.name(), resolvedBlobArray, resolvedBlobArray.name());
+      return;
+    }
+    appendEncodeBlobVector(
+        builder,
+        "this." + ((ResolvedBlobVector) member).name(),
+        (ResolvedBlobVector) member,
+        ((ResolvedBlobVector) member).name(),
+        primitiveFieldByName,
+        "this.");
+  }
+
+  /**
+   * Appends encode statements for one field member.
+   *
+   * @param builder destination source builder
+   * @param resolvedField field member to encode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendEncodeField(
+      StringBuilder builder,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    ResolvedTypeRef typeRef = resolvedField.typeRef();
+    String fieldExpression = "this." + resolvedField.name();
+
+    if (typeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
+      appendPrimitiveEncode(
+          builder, fieldExpression, primitiveTypeRef.primitiveType(), resolvedField.endian());
+      return;
+    }
+    if (typeRef instanceof MessageTypeRef messageTypeRef) {
+      String javaType = javaTypeForTypeRef(messageTypeRef, generationContext);
+      appendMessageEncode(builder, fieldExpression, resolvedField.name(), javaType);
+      return;
+    }
+    if (typeRef instanceof FloatTypeRef floatTypeRef) {
+      ResolvedFloat resolvedFloat =
+          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+      appendEncodeFloat(builder, fieldExpression, resolvedFloat, resolvedField.name());
+      return;
+    }
+    if (typeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
+      ResolvedScaledInt resolvedScaledInt =
+          generationContext.reusableScaledIntByName().get(scaledIntTypeRef.scaledIntTypeName());
+      appendEncodeScaledInt(builder, fieldExpression, resolvedScaledInt, resolvedField.name());
+      return;
+    }
+    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
+      ResolvedArray resolvedArray =
+          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+      appendEncodeArray(
+          builder, fieldExpression, resolvedArray, resolvedField.name(), generationContext);
+      return;
+    }
+    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
+      ResolvedVector resolvedVector =
+          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+      appendEncodeVector(
+          builder,
+          fieldExpression,
+          resolvedVector,
+          resolvedField.name(),
+          generationContext,
+          primitiveFieldByName,
+          "this.");
+      return;
+    }
+    if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
+      ResolvedBlobArray resolvedBlobArray =
+          generationContext.reusableBlobArrayByName().get(blobArrayTypeRef.blobArrayTypeName());
+      appendEncodeBlobArray(builder, fieldExpression, resolvedBlobArray, resolvedField.name());
+      return;
+    }
+
+    ResolvedBlobVector resolvedBlobVector =
+        generationContext
+            .reusableBlobVectorByName()
+            .get(((BlobVectorTypeRef) typeRef).blobVectorTypeName());
+    appendEncodeBlobVector(
+        builder,
+        fieldExpression,
+        resolvedBlobVector,
+        resolvedField.name(),
+        primitiveFieldByName,
+        "this.");
+  }
+
+  /**
+   * Appends primitive encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the value to encode
+   * @param primitiveType primitive type of the value
+   * @param endian optional endian override
+   */
+  private static void appendPrimitiveEncode(
+      StringBuilder builder, String valueExpression, PrimitiveType primitiveType, Endian endian) {
+    String order = byteOrderExpression(endian);
+    switch (primitiveType) {
+      case UINT8 -> builder.append("    writeUInt8(out, ").append(valueExpression).append(");\n");
+      case UINT16 -> builder
+          .append("    writeUInt16(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+      case UINT32 -> builder
+          .append("    writeUInt32(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+      case UINT64 -> builder
+          .append("    writeUInt64(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+      case INT8 -> builder.append("    writeInt8(out, ").append(valueExpression).append(");\n");
+      case INT16 -> builder
+          .append("    writeInt16(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+      case INT32 -> builder
+          .append("    writeInt32(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+      case INT64 -> builder
+          .append("    writeInt64(out, ")
+          .append(valueExpression)
+          .append(", ")
+          .append(order)
+          .append(");\n");
+    }
+  }
+
+  /**
+   * Appends nested-message encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the nested message value
+   * @param fieldName field name used in null-check text
+   * @param javaType nested Java type name used to build temp variable names
+   */
+  private static void appendMessageEncode(
+      StringBuilder builder, String valueExpression, String fieldName, String javaType) {
+    String variableSuffix = toPascalCase(javaType);
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n")
+        .append("    byte[] encoded")
+        .append(variableSuffix)
+        .append(" = ")
+        .append(valueExpression)
+        .append(".encode();\n")
+        .append("    out.write(encoded")
+        .append(variableSuffix)
+        .append(", 0, encoded")
+        .append(variableSuffix)
+        .append(".length);\n");
+  }
+
+  /**
+   * Appends bitField encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedBitField bitField member to encode
+   */
+  private static void appendEncodeBitField(
+      StringBuilder builder, ResolvedBitField resolvedBitField) {
+    PrimitiveType primitiveType = primitiveTypeForBitFieldSize(resolvedBitField.size());
+    appendPrimitiveEncode(
+        builder, "this." + resolvedBitField.name(), primitiveType, resolvedBitField.endian());
+  }
+
+  /**
+   * Resolves the primitive wire type used by one bitField storage size.
+   *
+   * @param bitFieldSize bitField storage size
+   * @return primitive wire type used to encode/decode bitField storage
+   */
+  private static PrimitiveType primitiveTypeForBitFieldSize(BitFieldSize bitFieldSize) {
+    return switch (bitFieldSize) {
+      case U8 -> PrimitiveType.UINT8;
+      case U16 -> PrimitiveType.UINT16;
+      case U32 -> PrimitiveType.UINT32;
+      case U64 -> PrimitiveType.UINT64;
+    };
+  }
+
+  /**
+   * Appends float encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the float logical value
+   * @param resolvedFloat float definition
+   * @param fieldName field/member name for exception messages
+   */
+  private static void appendEncodeFloat(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedFloat resolvedFloat,
+      String fieldName) {
+    String order = byteOrderExpression(resolvedFloat.endian());
+    String scaleLiteral = decimalLiteral(resolvedFloat.scale());
+
+    if (resolvedFloat.encoding() == FloatEncoding.IEEE754) {
+      switch (resolvedFloat.size()) {
+        case F16 -> builder
+            .append("    writeUInt16(out, Short.toUnsignedInt(Float.floatToFloat16((float) ")
+            .append(valueExpression)
+            .append(")), ")
+            .append(order)
+            .append(");\n");
+        case F32 -> builder
+            .append("    writeInt32(out, Float.floatToIntBits((float) ")
+            .append(valueExpression)
+            .append("), ")
+            .append(order)
+            .append(");\n");
+        case F64 -> builder
+            .append("    writeInt64(out, Double.doubleToLongBits(")
+            .append(valueExpression)
+            .append("), ")
+            .append(order)
+            .append(");\n");
+      }
+      return;
+    }
+
+    switch (resolvedFloat.size()) {
+      case F16 -> builder
+          .append("    writeInt16(out, (short) scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", -32768L, 32767L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case F32 -> builder
+          .append("    writeInt32(out, (int) scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", -2147483648L, 2147483647L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case F64 -> builder
+          .append("    writeInt64(out, scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", Long.MIN_VALUE, Long.MAX_VALUE, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+    }
+  }
+
+  /**
+   * Appends scaled-int encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the logical scaled value
+   * @param resolvedScaledInt scaled-int definition
+   * @param fieldName field/member name for exception messages
+   */
+  private static void appendEncodeScaledInt(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedScaledInt resolvedScaledInt,
+      String fieldName) {
+    String order = byteOrderExpression(resolvedScaledInt.endian());
+    String scaleLiteral = decimalLiteral(resolvedScaledInt.scale());
+
+    switch (resolvedScaledInt.baseType()) {
+      case INT8 -> builder
+          .append("    writeInt8(out, (byte) scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", -128L, 127L, \"")
+          .append(fieldName)
+          .append("\"));\n");
+      case UINT8 -> builder
+          .append("    writeUInt8(out, (short) scaleToUnsignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", 255L, \"")
+          .append(fieldName)
+          .append("\"));\n");
+      case INT16 -> builder
+          .append("    writeInt16(out, (short) scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", -32768L, 32767L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case UINT16 -> builder
+          .append("    writeUInt16(out, (int) scaleToUnsignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", 65535L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case INT32 -> builder
+          .append("    writeInt32(out, (int) scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", -2147483648L, 2147483647L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case UINT32 -> builder
+          .append("    writeUInt32(out, scaleToUnsignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", 4294967295L, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case INT64 -> builder
+          .append("    writeInt64(out, scaleToSignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", Long.MIN_VALUE, Long.MAX_VALUE, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+      case UINT64 -> builder
+          .append("    writeUInt64(out, (long) scaleToUnsignedRaw(")
+          .append(valueExpression)
+          .append(", ")
+          .append(scaleLiteral)
+          .append(", Long.MAX_VALUE, \"")
+          .append(fieldName)
+          .append("\"), ")
+          .append(order)
+          .append(");\n");
+    }
+  }
+
+  /**
+   * Appends fixed-array encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the array value
+   * @param resolvedArray array definition
+   * @param fieldName field/member name for exception text
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendEncodeArray(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedArray resolvedArray,
+      String fieldName,
+      GenerationContext generationContext) {
+    String loopItemName = toLoopItemName(fieldName);
+    String loopIndexName = toLoopIndexName(fieldName);
+
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n")
+        .append("    if (")
+        .append(valueExpression)
+        .append(".length != ")
+        .append(resolvedArray.length())
+        .append(") {\n")
+        .append("      throw new IllegalArgumentException(\"")
+        .append(fieldName)
+        .append(" must contain exactly ")
+        .append(resolvedArray.length())
+        .append(" elements.\");\n")
+        .append("    }\n")
+        .append("    for (int ")
+        .append(loopIndexName)
+        .append(" = 0; ")
+        .append(loopIndexName)
+        .append(" < ")
+        .append(resolvedArray.length())
+        .append("; ")
+        .append(loopIndexName)
+        .append("++) {\n")
+        .append("      ")
+        .append(javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext))
+        .append(' ')
+        .append(loopItemName)
+        .append(" = ")
+        .append(valueExpression)
+        .append('[')
+        .append(loopIndexName)
+        .append("];\n");
+
+    appendEncodeCollectionElement(
+        builder,
+        loopItemName,
+        resolvedArray.elementTypeRef(),
+        resolvedArray.endian(),
+        generationContext);
+
+    builder.append("    }\n");
+  }
+
+  /**
+   * Appends vector encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the vector value
+   * @param resolvedVector vector definition
+   * @param fieldName field/member name for exception text
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendEncodeVector(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedVector resolvedVector,
+      String fieldName,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    String loopItemName = toLoopItemName(fieldName);
+    String loopIndexName = toLoopIndexName(fieldName);
+
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n");
+
+    appendVectorCountValidation(
+        builder,
+        resolvedVector.lengthMode(),
+        valueExpression,
+        primitiveFieldByName,
+        ownerPrefix,
+        fieldName);
+
+    builder
+        .append("    for (int ")
+        .append(loopIndexName)
+        .append(" = 0; ")
+        .append(loopIndexName)
+        .append(" < ")
+        .append(valueExpression)
+        .append(".length; ")
+        .append(loopIndexName)
+        .append("++) {\n")
+        .append("      ")
+        .append(javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext))
+        .append(' ')
+        .append(loopItemName)
+        .append(" = ")
+        .append(valueExpression)
+        .append('[')
+        .append(loopIndexName)
+        .append("];\n");
+
+    appendEncodeCollectionElement(
+        builder,
+        loopItemName,
+        resolvedVector.elementTypeRef(),
+        resolvedVector.endian(),
+        generationContext);
+
+    builder.append("    }\n");
+
+    appendTerminatorEncode(
+        builder,
+        resolvedVector.lengthMode(),
+        resolvedVector.elementTypeRef(),
+        resolvedVector.endian(),
+        generationContext);
+  }
+
+  /**
+   * Appends count-field validation for vector/blobVector encoders.
+   *
+   * @param builder destination source builder
+   * @param lengthMode vector/blob length mode
+   * @param valueExpression expression that resolves to vector/blob value
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   * @param fieldName field/member name for exception text
+   */
+  private static void appendVectorCountValidation(
+      StringBuilder builder,
+      ResolvedLengthMode lengthMode,
+      String valueExpression,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      String fieldName) {
+    if (!(lengthMode instanceof ResolvedCountFieldLength resolvedCountFieldLength)) {
+      return;
+    }
+
+    PrimitiveType countFieldType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+    String countExpression =
+        countExpression(ownerPrefix + resolvedCountFieldLength.ref(), countFieldType);
+    String countMethod =
+        countFieldType == PrimitiveType.UINT64 ? "requireCountUnsignedLong" : "requireCount";
+    String localName = "expected" + toPascalCase(fieldName) + "Count";
+
+    builder
+        .append("    int ")
+        .append(localName)
+        .append(" = ")
+        .append(countMethod)
+        .append('(')
+        .append(countExpression)
+        .append(", \"")
+        .append(resolvedCountFieldLength.ref())
+        .append("\");\n")
+        .append("    if (")
+        .append(valueExpression)
+        .append(".length != ")
+        .append(localName)
+        .append(") {\n")
+        .append("      throw new IllegalArgumentException(\"")
+        .append(fieldName)
+        .append(" length must match count field ")
+        .append(resolvedCountFieldLength.ref())
+        .append(".\");\n")
+        .append("    }\n");
+  }
+
+  /**
+   * Appends terminator write statements for vector encoders.
+   *
+   * @param builder destination source builder
+   * @param lengthMode vector length mode
+   * @param elementTypeRef vector element type
+   * @param endian optional vector endian override
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendTerminatorEncode(
+      StringBuilder builder,
+      ResolvedLengthMode lengthMode,
+      ResolvedTypeRef elementTypeRef,
+      Endian endian,
+      GenerationContext generationContext) {
+    String terminatorLiteral = terminatorLiteral(lengthMode);
+    if (terminatorLiteral == null) {
+      return;
+    }
+
+    BigInteger numericLiteral = parseNumericLiteral(terminatorLiteral);
+    PrimitiveType primitiveType = ((PrimitiveTypeRef) elementTypeRef).primitiveType();
+    String terminatorExpression = primitiveLiteralExpression(primitiveType, numericLiteral);
+
+    appendEncodeCollectionElement(
+        builder, terminatorExpression, elementTypeRef, endian, generationContext);
+  }
+
+  /**
+   * Appends one collection element encode statement.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to one element value
+   * @param elementTypeRef collection element type reference
+   * @param endian optional endian override from the collection definition
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendEncodeCollectionElement(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedTypeRef elementTypeRef,
+      Endian endian,
+      GenerationContext generationContext) {
+    if (elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
+      appendPrimitiveEncode(builder, valueExpression, primitiveTypeRef.primitiveType(), endian);
+      return;
+    }
+
+    if (elementTypeRef instanceof MessageTypeRef messageTypeRef) {
+      String javaType = javaTypeForTypeRef(messageTypeRef, generationContext);
+      appendMessageEncode(builder, valueExpression, valueExpression, javaType);
+      return;
+    }
+
+    if (elementTypeRef instanceof FloatTypeRef floatTypeRef) {
+      ResolvedFloat resolvedFloat =
+          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+      appendEncodeFloat(builder, valueExpression, resolvedFloat, valueExpression);
+      return;
+    }
+
+    ResolvedScaledInt resolvedScaledInt =
+        generationContext
+            .reusableScaledIntByName()
+            .get(((ScaledIntTypeRef) elementTypeRef).scaledIntTypeName());
+    appendEncodeScaledInt(builder, valueExpression, resolvedScaledInt, valueExpression);
+  }
+
+  /**
+   * Appends blobArray encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the blob value
+   * @param resolvedBlobArray blobArray definition
+   * @param fieldName field/member name for exception text
+   */
+  private static void appendEncodeBlobArray(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedBlobArray resolvedBlobArray,
+      String fieldName) {
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n")
+        .append("    if (")
+        .append(valueExpression)
+        .append(".length != ")
+        .append(resolvedBlobArray.length())
+        .append(") {\n")
+        .append("      throw new IllegalArgumentException(\"")
+        .append(fieldName)
+        .append(" must contain exactly ")
+        .append(resolvedBlobArray.length())
+        .append(" bytes.\");\n")
+        .append("    }\n")
+        .append("    out.write(")
+        .append(valueExpression)
+        .append(", 0, ")
+        .append(resolvedBlobArray.length())
+        .append(");\n");
+  }
+
+  /**
+   * Appends blobVector encode statements.
+   *
+   * @param builder destination source builder
+   * @param valueExpression expression that resolves to the blob value
+   * @param resolvedBlobVector blobVector definition
+   * @param fieldName field/member name for exception text
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendEncodeBlobVector(
+      StringBuilder builder,
+      String valueExpression,
+      ResolvedBlobVector resolvedBlobVector,
+      String fieldName,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    builder
+        .append("    Objects.requireNonNull(")
+        .append(valueExpression)
+        .append(", \"")
+        .append(fieldName)
+        .append("\");\n");
+
+    appendVectorCountValidation(
+        builder,
+        resolvedBlobVector.lengthMode(),
+        valueExpression,
+        primitiveFieldByName,
+        ownerPrefix,
+        fieldName);
+
+    builder
+        .append("    out.write(")
+        .append(valueExpression)
+        .append(", 0, ")
+        .append(valueExpression)
+        .append(".length);\n");
+
+    String terminatorLiteral = terminatorLiteral(resolvedBlobVector.lengthMode());
+    if (terminatorLiteral != null) {
+      BigInteger numericLiteral = parseNumericLiteral(terminatorLiteral);
+      builder.append("    writeUInt8(out, (short) ").append(numericLiteral).append(");\n");
+    }
+  }
+
+  /**
+   * Resolves optional terminator literal from a length mode.
+   *
+   * @param lengthMode vector/blob length mode
+   * @return terminator literal when present, otherwise {@code null}
+   */
+  private static String terminatorLiteral(ResolvedLengthMode lengthMode) {
+    if (lengthMode instanceof ResolvedTerminatorValueLength resolvedTerminatorValueLength) {
+      return resolvedTerminatorValueLength.value();
+    }
+    if (lengthMode instanceof ResolvedTerminatorField resolvedTerminatorField) {
+      return terminatorLiteral(resolvedTerminatorField.next());
+    }
+    return null;
+  }
+
+  /**
+   * Resolves optional terminator literal from one terminator node.
+   *
+   * @param terminatorNode terminator node to inspect
+   * @return terminator literal when present, otherwise {@code null}
+   */
+  private static String terminatorLiteral(ResolvedTerminatorNode terminatorNode) {
+    if (terminatorNode == null) {
+      return null;
+    }
+    if (terminatorNode instanceof ResolvedTerminatorMatch resolvedTerminatorMatch) {
+      return resolvedTerminatorMatch.value();
+    }
+    return terminatorLiteral(((ResolvedTerminatorField) terminatorNode).next());
+  }
+
+  /**
+   * Appends decode methods.
+   *
+   * @param builder destination source builder
+   * @param messageType message being rendered
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendDecodeMethods(
+      StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
     builder
         .append("  /**\n")
         .append("   * Decodes a message instance from a byte array.\n")
@@ -410,195 +2503,965 @@ public final class JavaCodeGenerator {
         .append(messageType.name())
         .append("();\n");
 
-    for (ResolvedField field : messageType.fields()) {
-      appendDecodeLine(builder, field, messageTypeByName);
+    Map<String, PrimitiveType> primitiveFieldByName = primitiveFieldsByName(messageType);
+    for (ResolvedMessageMember member : messageType.members()) {
+      appendDecodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
     }
 
     builder.append("    return value;\n");
     builder.append("  }\n\n");
-
-    builder.append(SHARED_IO_HELPERS);
-    builder.append("}\n");
-
-    return builder.toString();
   }
 
   /**
-   * Resolves a field type reference into a Java type name.
+   * Appends decode statements for one member.
    *
-   * @param typeRef resolved type reference
-   * @param messageTypeByName lookup for message references
-   * @return Java type name used in generated source
+   * @param builder destination source builder
+   * @param member member to decode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
    */
-  private static String toJavaType(
-      ResolvedTypeRef typeRef, Map<String, ResolvedMessageType> messageTypeByName) {
+  private static void appendDecodeMember(
+      StringBuilder builder,
+      ResolvedMessageMember member,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    if (member instanceof ResolvedField resolvedField) {
+      appendDecodeField(
+          builder, resolvedField, messageType, generationContext, primitiveFieldByName);
+      return;
+    }
+    if (member instanceof ResolvedBitField resolvedBitField) {
+      appendDecodeBitField(builder, resolvedBitField);
+      return;
+    }
+    if (member instanceof ResolvedFloat resolvedFloat) {
+      appendDecodeFloat(builder, "value." + resolvedFloat.name(), resolvedFloat);
+      return;
+    }
+    if (member instanceof ResolvedScaledInt resolvedScaledInt) {
+      appendDecodeScaledInt(builder, "value." + resolvedScaledInt.name(), resolvedScaledInt);
+      return;
+    }
+    if (member instanceof ResolvedArray resolvedArray) {
+      appendDecodeArray(
+          builder,
+          "value." + resolvedArray.name(),
+          resolvedArray,
+          resolvedArray.name(),
+          generationContext);
+      return;
+    }
+    if (member instanceof ResolvedVector resolvedVector) {
+      appendDecodeVector(
+          builder,
+          "value." + resolvedVector.name(),
+          resolvedVector,
+          resolvedVector.name(),
+          generationContext,
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
+    if (member instanceof ResolvedBlobArray resolvedBlobArray) {
+      appendDecodeBlobArray(builder, "value." + resolvedBlobArray.name(), resolvedBlobArray);
+      return;
+    }
+
+    appendDecodeBlobVector(
+        builder,
+        "value." + ((ResolvedBlobVector) member).name(),
+        (ResolvedBlobVector) member,
+        ((ResolvedBlobVector) member).name(),
+        primitiveFieldByName,
+        "value.");
+  }
+
+  /**
+   * Appends decode statements for one field member.
+   *
+   * @param builder destination source builder
+   * @param resolvedField field member to decode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendDecodeField(
+      StringBuilder builder,
+      ResolvedField resolvedField,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    ResolvedTypeRef typeRef = resolvedField.typeRef();
+    String targetExpression = "value." + resolvedField.name();
+
     if (typeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
-      return primitiveTypeRef.primitiveType().javaTypeName();
+      appendPrimitiveDecode(
+          builder, targetExpression, primitiveTypeRef.primitiveType(), resolvedField.endian());
+      return;
     }
     if (typeRef instanceof MessageTypeRef messageTypeRef) {
-      ResolvedMessageType messageType = messageTypeByName.get(messageTypeRef.messageTypeName());
-      return messageType == null ? messageTypeRef.messageTypeName() : messageType.name();
+      String javaType = javaTypeForTypeRef(messageTypeRef, generationContext);
+      builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = ")
+          .append(javaType)
+          .append(".decode(input);\n");
+      return;
     }
-    throw new IllegalStateException("Unhandled type reference: " + typeRef);
+    if (typeRef instanceof FloatTypeRef floatTypeRef) {
+      ResolvedFloat resolvedFloat =
+          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+      appendDecodeFloat(builder, targetExpression, resolvedFloat);
+      return;
+    }
+    if (typeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
+      ResolvedScaledInt resolvedScaledInt =
+          generationContext.reusableScaledIntByName().get(scaledIntTypeRef.scaledIntTypeName());
+      appendDecodeScaledInt(builder, targetExpression, resolvedScaledInt);
+      return;
+    }
+    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
+      ResolvedArray resolvedArray =
+          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
+      appendDecodeArray(
+          builder, targetExpression, resolvedArray, resolvedField.name(), generationContext);
+      return;
+    }
+    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
+      ResolvedVector resolvedVector =
+          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
+      appendDecodeVector(
+          builder,
+          targetExpression,
+          resolvedVector,
+          resolvedField.name(),
+          generationContext,
+          primitiveFieldByName,
+          "value.");
+      return;
+    }
+    if (typeRef instanceof BlobArrayTypeRef blobArrayTypeRef) {
+      ResolvedBlobArray resolvedBlobArray =
+          generationContext.reusableBlobArrayByName().get(blobArrayTypeRef.blobArrayTypeName());
+      appendDecodeBlobArray(builder, targetExpression, resolvedBlobArray);
+      return;
+    }
+
+    ResolvedBlobVector resolvedBlobVector =
+        generationContext
+            .reusableBlobVectorByName()
+            .get(((BlobVectorTypeRef) typeRef).blobVectorTypeName());
+    appendDecodeBlobVector(
+        builder,
+        targetExpression,
+        resolvedBlobVector,
+        resolvedField.name(),
+        primitiveFieldByName,
+        "value.");
   }
 
   /**
-   * Appends Java encode statements for one field.
+   * Appends primitive decode statements.
    *
    * @param builder destination source builder
-   * @param field resolved field to encode
-   * @param messageTypeByName lookup for message references
+   * @param targetExpression assignment target expression
+   * @param primitiveType primitive type to decode
+   * @param endian optional endian override
    */
-  private static void appendEncodeLine(
-      StringBuilder builder,
-      ResolvedField field,
-      Map<String, ResolvedMessageType> messageTypeByName) {
-    if (field.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
-      PrimitiveType primitiveType = primitiveTypeRef.primitiveType();
-      String byteOrder = byteOrderExpression(field.endian());
-      switch (primitiveType) {
-        case UINT8 -> builder
-            .append("    writeUInt8(out, this.")
-            .append(field.name())
-            .append(");\n");
-        case UINT16 -> builder
-            .append("    writeUInt16(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
-        case UINT32 -> builder
-            .append("    writeUInt32(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
-        case UINT64 -> builder
-            .append("    writeUInt64(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT8 -> builder.append("    writeInt8(out, this.").append(field.name()).append(");\n");
-        case INT16 -> builder
-            .append("    writeInt16(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT32 -> builder
-            .append("    writeInt32(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT64 -> builder
-            .append("    writeInt64(out, this.")
-            .append(field.name())
-            .append(", ")
-            .append(byteOrder)
-            .append(");\n");
+  private static void appendPrimitiveDecode(
+      StringBuilder builder, String targetExpression, PrimitiveType primitiveType, Endian endian) {
+    String order = byteOrderExpression(endian);
+    switch (primitiveType) {
+      case UINT8 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt8(input);\n");
+      case UINT16 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt16(input, ")
+          .append(order)
+          .append(");\n");
+      case UINT32 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt32(input, ")
+          .append(order)
+          .append(");\n");
+      case UINT64 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt64(input, ")
+          .append(order)
+          .append(");\n");
+      case INT8 -> builder.append("    ").append(targetExpression).append(" = readInt8(input);\n");
+      case INT16 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt16(input, ")
+          .append(order)
+          .append(");\n");
+      case INT32 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt32(input, ")
+          .append(order)
+          .append(");\n");
+      case INT64 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt64(input, ")
+          .append(order)
+          .append(");\n");
+    }
+  }
+
+  /**
+   * Appends bitField decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedBitField bitField member to decode
+   */
+  private static void appendDecodeBitField(
+      StringBuilder builder, ResolvedBitField resolvedBitField) {
+    PrimitiveType primitiveType = primitiveTypeForBitFieldSize(resolvedBitField.size());
+    appendPrimitiveDecode(
+        builder, "value." + resolvedBitField.name(), primitiveType, resolvedBitField.endian());
+  }
+
+  /**
+   * Appends float decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedFloat float definition
+   */
+  private static void appendDecodeFloat(
+      StringBuilder builder, String targetExpression, ResolvedFloat resolvedFloat) {
+    String order = byteOrderExpression(resolvedFloat.endian());
+    String scaleLiteral = decimalLiteral(resolvedFloat.scale());
+
+    if (resolvedFloat.encoding() == FloatEncoding.IEEE754) {
+      switch (resolvedFloat.size()) {
+        case F16 -> builder
+            .append("    ")
+            .append(targetExpression)
+            .append(" = Float.float16ToFloat((short) readUInt16(input, ")
+            .append(order)
+            .append("));\n");
+        case F32 -> builder
+            .append("    ")
+            .append(targetExpression)
+            .append(" = Float.intBitsToFloat(readInt32(input, ")
+            .append(order)
+            .append("));\n");
+        case F64 -> builder
+            .append("    ")
+            .append(targetExpression)
+            .append(" = Double.longBitsToDouble(readInt64(input, ")
+            .append(order)
+            .append("));\n");
       }
       return;
     }
 
-    MessageTypeRef messageTypeRef = (MessageTypeRef) field.typeRef();
-    String javaType = toJavaType(messageTypeRef, messageTypeByName);
-    builder
-        .append("    Objects.requireNonNull(this.")
-        .append(field.name())
-        .append(", \"")
-        .append(field.name())
-        .append("\");\n")
-        .append("    byte[] encoded")
-        .append(javaType)
-        .append(" = this.")
-        .append(field.name())
-        .append(".encode();\n")
-        .append("    out.write(encoded")
-        .append(javaType)
-        .append(", 0, encoded")
-        .append(javaType)
-        .append(".length);\n");
+    switch (resolvedFloat.size()) {
+      case F16 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt16(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case F32 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt32(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case F64 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt64(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+    }
   }
 
   /**
-   * Appends Java decode statements for one field.
+   * Appends scaled-int decode statements.
    *
    * @param builder destination source builder
-   * @param field resolved field to decode
-   * @param messageTypeByName lookup for message references
+   * @param targetExpression assignment target expression
+   * @param resolvedScaledInt scaled-int definition
    */
-  private static void appendDecodeLine(
+  private static void appendDecodeScaledInt(
+      StringBuilder builder, String targetExpression, ResolvedScaledInt resolvedScaledInt) {
+    String order = byteOrderExpression(resolvedScaledInt.endian());
+    String scaleLiteral = decimalLiteral(resolvedScaledInt.scale());
+
+    switch (resolvedScaledInt.baseType()) {
+      case INT8 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt8(input) * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case UINT8 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt8(input) * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case INT16 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt16(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case UINT16 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt16(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case INT32 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt32(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case UINT32 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt32(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case INT64 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readInt64(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+      case UINT64 -> builder
+          .append("    ")
+          .append(targetExpression)
+          .append(" = readUInt64(input, ")
+          .append(order)
+          .append(") * ")
+          .append(scaleLiteral)
+          .append(";\n");
+    }
+  }
+
+  /**
+   * Appends fixed-array decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedArray array definition
+   * @param fieldName field/member name for local variables
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendDecodeArray(
       StringBuilder builder,
-      ResolvedField field,
-      Map<String, ResolvedMessageType> messageTypeByName) {
-    if (field.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
-      PrimitiveType primitiveType = primitiveTypeRef.primitiveType();
-      String byteOrder = byteOrderExpression(field.endian());
-      switch (primitiveType) {
-        case UINT8 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readUInt8(input);\n");
-        case UINT16 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readUInt16(input, ")
-            .append(byteOrder)
-            .append(");\n");
-        case UINT32 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readUInt32(input, ")
-            .append(byteOrder)
-            .append(");\n");
-        case UINT64 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readUInt64(input, ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT8 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readInt8(input);\n");
-        case INT16 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readInt16(input, ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT32 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readInt32(input, ")
-            .append(byteOrder)
-            .append(");\n");
-        case INT64 -> builder
-            .append("    value.")
-            .append(field.name())
-            .append(" = readInt64(input, ")
-            .append(byteOrder)
-            .append(");\n");
-      }
+      String targetExpression,
+      ResolvedArray resolvedArray,
+      String fieldName,
+      GenerationContext generationContext) {
+    String loopIndexName = toLoopIndexName(fieldName);
+    String loopItemName = toLoopItemName(fieldName);
+    String elementType =
+        javaElementTypeForCollection(resolvedArray.elementTypeRef(), generationContext);
+
+    builder
+        .append("    ")
+        .append(targetExpression)
+        .append(" = new ")
+        .append(elementType)
+        .append('[')
+        .append(resolvedArray.length())
+        .append("];\n")
+        .append("    for (int ")
+        .append(loopIndexName)
+        .append(" = 0; ")
+        .append(loopIndexName)
+        .append(" < ")
+        .append(resolvedArray.length())
+        .append("; ")
+        .append(loopIndexName)
+        .append("++) {\n");
+
+    appendDecodeCollectionElement(
+        builder,
+        loopItemName,
+        resolvedArray.elementTypeRef(),
+        resolvedArray.endian(),
+        generationContext);
+
+    builder
+        .append("      ")
+        .append(targetExpression)
+        .append('[')
+        .append(loopIndexName)
+        .append("] = ")
+        .append(loopItemName)
+        .append(";\n")
+        .append("    }\n");
+  }
+
+  /**
+   * Appends vector decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedVector vector definition
+   * @param fieldName field/member name for local variables
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendDecodeVector(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedVector resolvedVector,
+      String fieldName,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    if (resolvedVector.lengthMode() instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      appendDecodeCountedVector(
+          builder,
+          targetExpression,
+          resolvedVector,
+          fieldName,
+          generationContext,
+          primitiveFieldByName,
+          ownerPrefix,
+          resolvedCountFieldLength);
       return;
     }
 
-    MessageTypeRef messageTypeRef = (MessageTypeRef) field.typeRef();
-    String javaType = toJavaType(messageTypeRef, messageTypeByName);
+    appendDecodeTerminatedVector(
+        builder,
+        targetExpression,
+        resolvedVector,
+        fieldName,
+        generationContext,
+        terminatorLiteral(resolvedVector.lengthMode()));
+  }
+
+  /**
+   * Appends decode statements for count-based vectors.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedVector vector definition
+   * @param fieldName field/member name for local variables
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   * @param resolvedCountFieldLength count-field length mode
+   */
+  private static void appendDecodeCountedVector(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedVector resolvedVector,
+      String fieldName,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix,
+      ResolvedCountFieldLength resolvedCountFieldLength) {
+    String countLocalName = "expected" + toPascalCase(fieldName) + "Count";
+    PrimitiveType countFieldType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+    String countExpression =
+        countExpression(ownerPrefix + resolvedCountFieldLength.ref(), countFieldType);
+    String countMethod =
+        countFieldType == PrimitiveType.UINT64 ? "requireCountUnsignedLong" : "requireCount";
+    String elementType =
+        javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext);
+    String loopIndexName = toLoopIndexName(fieldName);
+    String loopItemName = toLoopItemName(fieldName);
+
     builder
-        .append("    value.")
-        .append(field.name())
+        .append("    int ")
+        .append(countLocalName)
         .append(" = ")
-        .append(javaType)
-        .append(".decode(input);\n");
+        .append(countMethod)
+        .append('(')
+        .append(countExpression)
+        .append(", \"")
+        .append(resolvedCountFieldLength.ref())
+        .append("\");\n")
+        .append("    ")
+        .append(targetExpression)
+        .append(" = new ")
+        .append(elementType)
+        .append('[')
+        .append(countLocalName)
+        .append("];\n")
+        .append("    for (int ")
+        .append(loopIndexName)
+        .append(" = 0; ")
+        .append(loopIndexName)
+        .append(" < ")
+        .append(countLocalName)
+        .append("; ")
+        .append(loopIndexName)
+        .append("++) {\n");
+
+    appendDecodeCollectionElement(
+        builder,
+        loopItemName,
+        resolvedVector.elementTypeRef(),
+        resolvedVector.endian(),
+        generationContext);
+
+    builder
+        .append("      ")
+        .append(targetExpression)
+        .append('[')
+        .append(loopIndexName)
+        .append("] = ")
+        .append(loopItemName)
+        .append(";\n")
+        .append("    }\n");
   }
 
   /**
-   * Converts a BMS endian value to the Java {@link ByteOrder} constant expression.
+   * Appends decode statements for terminator-based vectors.
    *
-   * @param endian resolved endian value
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedVector vector definition
+   * @param fieldName field/member name for local variables
+   * @param generationContext reusable lookup maps
+   * @param literal terminator literal text
+   */
+  private static void appendDecodeTerminatedVector(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedVector resolvedVector,
+      String fieldName,
+      GenerationContext generationContext,
+      String literal) {
+    PrimitiveType primitiveType =
+        ((PrimitiveTypeRef) resolvedVector.elementTypeRef()).primitiveType();
+    BigInteger numericLiteral = parseNumericLiteral(literal);
+
+    String listName = toLoopItemName(fieldName) + "List";
+    String loopItemName = toLoopItemName(fieldName);
+    String loopIndexName = toLoopIndexName(fieldName);
+    String wrapperType = wrapperTypeForPrimitive(primitiveType);
+    String elementType =
+        javaElementTypeForCollection(resolvedVector.elementTypeRef(), generationContext);
+
+    builder
+        .append("    ArrayList<")
+        .append(wrapperType)
+        .append("> ")
+        .append(listName)
+        .append(" = new ArrayList<>();\n")
+        .append("    while (true) {\n");
+
+    appendDecodeCollectionElement(
+        builder,
+        loopItemName,
+        resolvedVector.elementTypeRef(),
+        resolvedVector.endian(),
+        generationContext);
+
+    builder
+        .append("      if (")
+        .append(terminatorComparisonExpression(loopItemName, primitiveType, numericLiteral))
+        .append(") {\n")
+        .append("        break;\n")
+        .append("      }\n")
+        .append("      ")
+        .append(listName)
+        .append(".add(")
+        .append(loopItemName)
+        .append(");\n")
+        .append("    }\n")
+        .append("    ")
+        .append(targetExpression)
+        .append(" = new ")
+        .append(elementType)
+        .append('[')
+        .append(listName)
+        .append(".size()];\n")
+        .append("    for (int ")
+        .append(loopIndexName)
+        .append(" = 0; ")
+        .append(loopIndexName)
+        .append(" < ")
+        .append(listName)
+        .append(".size(); ")
+        .append(loopIndexName)
+        .append("++) {\n")
+        .append("      ")
+        .append(targetExpression)
+        .append('[')
+        .append(loopIndexName)
+        .append("] = ")
+        .append(listName)
+        .append(".get(")
+        .append(loopIndexName)
+        .append(");\n")
+        .append("    }\n");
+  }
+
+  /**
+   * Appends one collection element decode statement.
+   *
+   * @param builder destination source builder
+   * @param targetLocalName local variable name that receives decoded element value
+   * @param elementTypeRef collection element type reference
+   * @param endian optional endian override from the collection definition
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendDecodeCollectionElement(
+      StringBuilder builder,
+      String targetLocalName,
+      ResolvedTypeRef elementTypeRef,
+      Endian endian,
+      GenerationContext generationContext) {
+    if (elementTypeRef instanceof PrimitiveTypeRef primitiveTypeRef) {
+      builder
+          .append("      ")
+          .append(primitiveTypeRef.primitiveType().javaTypeName())
+          .append(' ')
+          .append(targetLocalName)
+          .append(" = ")
+          .append(primitiveDecodeExpression(primitiveTypeRef.primitiveType(), endian))
+          .append(";\n");
+      return;
+    }
+
+    if (elementTypeRef instanceof MessageTypeRef messageTypeRef) {
+      String javaType = javaTypeForTypeRef(messageTypeRef, generationContext);
+      builder
+          .append("      ")
+          .append(javaType)
+          .append(' ')
+          .append(targetLocalName)
+          .append(" = ")
+          .append(javaType)
+          .append(".decode(input);\n");
+      return;
+    }
+
+    if (elementTypeRef instanceof FloatTypeRef floatTypeRef) {
+      ResolvedFloat resolvedFloat =
+          generationContext.reusableFloatByName().get(floatTypeRef.floatTypeName());
+      builder.append("      double ").append(targetLocalName).append(";\n");
+      appendDecodeFloat(builder, targetLocalName, resolvedFloat);
+      return;
+    }
+
+    ResolvedScaledInt resolvedScaledInt =
+        generationContext
+            .reusableScaledIntByName()
+            .get(((ScaledIntTypeRef) elementTypeRef).scaledIntTypeName());
+    builder.append("      double ").append(targetLocalName).append(";\n");
+    appendDecodeScaledInt(builder, targetLocalName, resolvedScaledInt);
+  }
+
+  /**
+   * Appends blobArray decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedBlobArray blobArray definition
+   */
+  private static void appendDecodeBlobArray(
+      StringBuilder builder, String targetExpression, ResolvedBlobArray resolvedBlobArray) {
+    builder
+        .append("    ")
+        .append(targetExpression)
+        .append(" = new byte[")
+        .append(resolvedBlobArray.length())
+        .append("];\n")
+        .append("    input.get(")
+        .append(targetExpression)
+        .append(");\n");
+  }
+
+  /**
+   * Appends blobVector decode statements.
+   *
+   * @param builder destination source builder
+   * @param targetExpression assignment target expression
+   * @param resolvedBlobVector blobVector definition
+   * @param fieldName field/member name for local variables
+   * @param primitiveFieldByName primitive field lookup map
+   * @param ownerPrefix owner expression prefix used for count-field access
+   */
+  private static void appendDecodeBlobVector(
+      StringBuilder builder,
+      String targetExpression,
+      ResolvedBlobVector resolvedBlobVector,
+      String fieldName,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String ownerPrefix) {
+    if (resolvedBlobVector.lengthMode()
+        instanceof ResolvedCountFieldLength resolvedCountFieldLength) {
+      String countLocalName = "expected" + toPascalCase(fieldName) + "Count";
+      PrimitiveType countFieldType = primitiveFieldByName.get(resolvedCountFieldLength.ref());
+      String countExpression =
+          countExpression(ownerPrefix + resolvedCountFieldLength.ref(), countFieldType);
+      String countMethod =
+          countFieldType == PrimitiveType.UINT64 ? "requireCountUnsignedLong" : "requireCount";
+
+      builder
+          .append("    int ")
+          .append(countLocalName)
+          .append(" = ")
+          .append(countMethod)
+          .append('(')
+          .append(countExpression)
+          .append(", \"")
+          .append(resolvedCountFieldLength.ref())
+          .append("\");\n")
+          .append("    ")
+          .append(targetExpression)
+          .append(" = new byte[")
+          .append(countLocalName)
+          .append("];\n")
+          .append("    input.get(")
+          .append(targetExpression)
+          .append(");\n");
+      return;
+    }
+
+    BigInteger numericLiteral =
+        parseNumericLiteral(terminatorLiteral(resolvedBlobVector.lengthMode()));
+    String tempName = toLoopItemName(fieldName) + "Buffer";
+    builder
+        .append("    ByteArrayOutputStream ")
+        .append(tempName)
+        .append(" = new ByteArrayOutputStream();\n")
+        .append("    while (true) {\n")
+        .append("      short nextByte = readUInt8(input);\n")
+        .append("      if ((nextByte & 0xFFL) == ")
+        .append(numericLiteral)
+        .append("L) {\n")
+        .append("        break;\n")
+        .append("      }\n")
+        .append("      ")
+        .append(tempName)
+        .append(".write(nextByte & 0xFF);\n")
+        .append("    }\n")
+        .append("    ")
+        .append(targetExpression)
+        .append(" = ")
+        .append(tempName)
+        .append(".toByteArray();\n");
+  }
+
+  /**
+   * Converts one primitive decode operation into a Java expression.
+   *
+   * @param primitiveType primitive type to decode
+   * @param endian optional endian override
+   * @return Java expression that decodes one primitive value from input
+   */
+  private static String primitiveDecodeExpression(PrimitiveType primitiveType, Endian endian) {
+    String order = byteOrderExpression(endian);
+    return switch (primitiveType) {
+      case UINT8 -> "readUInt8(input)";
+      case UINT16 -> "readUInt16(input, " + order + ")";
+      case UINT32 -> "readUInt32(input, " + order + ")";
+      case UINT64 -> "readUInt64(input, " + order + ")";
+      case INT8 -> "readInt8(input)";
+      case INT16 -> "readInt16(input, " + order + ")";
+      case INT32 -> "readInt32(input, " + order + ")";
+      case INT64 -> "readInt64(input, " + order + ")";
+    };
+  }
+
+  /**
+   * Builds a primitive count expression from one field expression.
+   *
+   * @param fieldExpression expression that resolves to the primitive count field
+   * @param primitiveType primitive type of the count field
+   * @return expression converted to a long-friendly count value
+   */
+  private static String countExpression(String fieldExpression, PrimitiveType primitiveType) {
+    return switch (primitiveType) {
+      case UINT8 -> "(" + fieldExpression + " & 0xFFL)";
+      case UINT16 -> "(" + fieldExpression + " & 0xFFFFL)";
+      case UINT32 -> "(" + fieldExpression + " & 0xFFFFFFFFL)";
+      case UINT64 -> fieldExpression;
+      case INT8, INT16, INT32, INT64 -> fieldExpression;
+    };
+  }
+
+  /**
+   * Builds a local loop-item variable name.
+   *
+   * @param fieldName field/member name
+   * @return deterministic local variable name
+   */
+  private static String toLoopItemName(String fieldName) {
+    return "item" + toPascalCase(fieldName);
+  }
+
+  /**
+   * Builds a local loop-index variable name.
+   *
+   * @param fieldName field/member name
+   * @return deterministic index variable name
+   */
+  private static String toLoopIndexName(String fieldName) {
+    return "index" + toPascalCase(fieldName);
+  }
+
+  /**
+   * Returns Java wrapper type for one primitive type.
+   *
+   * @param primitiveType primitive type to inspect
+   * @return wrapper type name used in temporary lists
+   */
+  private static String wrapperTypeForPrimitive(PrimitiveType primitiveType) {
+    return switch (primitiveType) {
+      case UINT8, INT16 -> "Short";
+      case UINT16, INT32 -> "Integer";
+      case UINT32, UINT64, INT64 -> "Long";
+      case INT8 -> "Byte";
+    };
+  }
+
+  /**
+   * Builds a primitive-typed terminator literal expression.
+   *
+   * @param primitiveType primitive type of the terminator element
+   * @param numericLiteral parsed numeric literal value
+   * @return Java expression that yields a value in the primitive type
+   */
+  private static String primitiveLiteralExpression(
+      PrimitiveType primitiveType, BigInteger numericLiteral) {
+    return switch (primitiveType) {
+      case UINT8 -> "(short) " + numericLiteral;
+      case UINT16 -> "(int) " + numericLiteral;
+      case UINT32, UINT64 -> numericLiteral.longValue() + "L";
+      case INT8 -> "(byte) " + numericLiteral;
+      case INT16 -> "(short) " + numericLiteral;
+      case INT32 -> "(int) " + numericLiteral;
+      case INT64 -> numericLiteral.longValue() + "L";
+    };
+  }
+
+  /**
+   * Builds a terminator equality expression for one primitive local variable.
+   *
+   * @param valueExpression local variable expression
+   * @param primitiveType primitive type of that variable
+   * @param numericLiteral parsed terminator literal value
+   * @return Java expression that evaluates to true when terminator is reached
+   */
+  private static String terminatorComparisonExpression(
+      String valueExpression, PrimitiveType primitiveType, BigInteger numericLiteral) {
+    return switch (primitiveType) {
+      case UINT8 -> "((" + valueExpression + " & 0xFFL) == " + numericLiteral + "L)";
+      case UINT16 -> "((" + valueExpression + " & 0xFFFFL) == " + numericLiteral + "L)";
+      case UINT32 -> "((" + valueExpression + " & 0xFFFFFFFFL) == " + numericLiteral + "L)";
+      case UINT64 -> "(Long.compareUnsigned("
+          + valueExpression
+          + ", "
+          + numericLiteral.longValue()
+          + "L) == 0)";
+      case INT8, INT16, INT32, INT64 -> "(((long) "
+          + valueExpression
+          + ") == "
+          + numericLiteral
+          + "L)";
+    };
+  }
+
+  /**
+   * Parses one numeric literal used by terminator modes.
+   *
+   * @param literal raw literal text from XML
+   * @return parsed integer value
+   * @throws NumberFormatException when the literal is not numeric
+   */
+  private static BigInteger parseNumericLiteral(String literal) {
+    String trimmed = literal.trim();
+    if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+      return new BigInteger(trimmed.substring(2), 16);
+    }
+    if (trimmed.startsWith("-") && (trimmed.startsWith("-0x") || trimmed.startsWith("-0X"))) {
+      return new BigInteger(trimmed.substring(3), 16).negate();
+    }
+    if (trimmed.matches("-?[0-9]+")) {
+      return new BigInteger(trimmed, 10);
+    }
+    return new BigInteger(trimmed, 16);
+  }
+
+  /**
+   * Checks whether a numeric literal fits the value range for one primitive type.
+   *
+   * @param numericLiteral parsed numeric literal
+   * @param primitiveType primitive target type
+   * @return {@code true} when the literal is representable by the primitive type
+   */
+  private static boolean fitsPrimitiveRange(
+      BigInteger numericLiteral, PrimitiveType primitiveType) {
+    return switch (primitiveType) {
+      case UINT8 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(255));
+      case UINT16 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(65_535));
+      case UINT32 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(4_294_967_295L));
+      case UINT64 -> inRange(
+          numericLiteral, BigInteger.ZERO, new BigInteger("18446744073709551615"));
+      case INT8 -> inRange(numericLiteral, BigInteger.valueOf(-128), BigInteger.valueOf(127));
+      case INT16 -> inRange(
+          numericLiteral, BigInteger.valueOf(-32_768), BigInteger.valueOf(32_767));
+      case INT32 -> inRange(
+          numericLiteral,
+          BigInteger.valueOf(Integer.MIN_VALUE),
+          BigInteger.valueOf(Integer.MAX_VALUE));
+      case INT64 -> inRange(
+          numericLiteral, BigInteger.valueOf(Long.MIN_VALUE), BigInteger.valueOf(Long.MAX_VALUE));
+    };
+  }
+
+  /**
+   * Checks whether a numeric value is between inclusive lower and upper bounds.
+   *
+   * @param value value to check
+   * @param lowerInclusive lower bound (inclusive)
+   * @param upperInclusive upper bound (inclusive)
+   * @return {@code true} when value is in range
+   */
+  private static boolean inRange(
+      BigInteger value, BigInteger lowerInclusive, BigInteger upperInclusive) {
+    return value.compareTo(lowerInclusive) >= 0 && value.compareTo(upperInclusive) <= 0;
+  }
+
+  /**
+   * Converts an optional endian value to a Java {@link java.nio.ByteOrder} expression.
+   *
+   * @param endian optional endian override from the resolved model
    * @return Java source expression for the matching byte order
    */
   private static String byteOrderExpression(Endian endian) {
@@ -607,4 +3470,25 @@ public final class JavaCodeGenerator {
     }
     return "ByteOrder.BIG_ENDIAN";
   }
+
+  /**
+   * Converts an optional decimal value to a deterministic Java double literal.
+   *
+   * @param decimal decimal value from the resolved model
+   * @return Java double literal string
+   */
+  private static String decimalLiteral(BigDecimal decimal) {
+    BigDecimal safeDecimal = decimal == null ? BigDecimal.ZERO : decimal;
+    return safeDecimal.toPlainString() + "d";
+  }
+
+  /** Immutable lookup maps used while rendering one schema. */
+  private record GenerationContext(
+      Map<String, ResolvedMessageType> messageTypeByName,
+      Map<String, ResolvedFloat> reusableFloatByName,
+      Map<String, ResolvedScaledInt> reusableScaledIntByName,
+      Map<String, ResolvedArray> reusableArrayByName,
+      Map<String, ResolvedVector> reusableVectorByName,
+      Map<String, ResolvedBlobArray> reusableBlobArrayByName,
+      Map<String, ResolvedBlobVector> reusableBlobVectorByName) {}
 }

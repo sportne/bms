@@ -1,4 +1,4 @@
-package acme.telemetry;
+package acme.telemetry.numeric;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -6,14 +6,62 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Objects;
 
-public final class Header {
+public final class TelemetryFrame {
   public short version;
-  public int sequence;
+  public short statusBits;
+  public double temperature;
+  public double voltage;
+  public double reusableTemperature;
+  public double reusableFloat;
+
+  private long getStatusBitsRaw() {
+    return (this.statusBits & 0xFFL);
+  }
+
+  private void setStatusBitsRaw(long raw) {
+    this.statusBits = (short) (raw & 0xFFL);
+  }
+
+  public boolean isStatusBitsAlarm() {
+    return (getStatusBitsRaw() & 1L) != 0L;
+  }
+
+  public void setStatusBitsAlarm(boolean enabled) {
+    long raw = getStatusBitsRaw();
+    if (enabled) {
+      raw |= 1L;
+    } else {
+      raw &= ~1L;
+    }
+    setStatusBitsRaw(raw);
+  }
+
+  public static final long STATUSBITS_STATE_OFF = 0L;
+  public static final long STATUSBITS_STATE_ON = 1L;
+
+  public long getStatusBitsState() {
+    long raw = getStatusBitsRaw();
+    return (raw >>> 1) & 3L;
+  }
+
+  public void setStatusBitsState(long value) {
+    if (value < 0L || value > 3L) {
+      throw new IllegalArgumentException("Segment state in bitField statusBits must be in [0, 3]");
+    }
+    long raw = getStatusBitsRaw();
+    long clearMask = ~(3L << 1);
+    raw = (raw & clearMask) | ((value & 3L) << 1);
+    setStatusBitsRaw(raw);
+  }
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     writeUInt8(out, this.version);
-    writeUInt16(out, this.sequence, ByteOrder.LITTLE_ENDIAN);
+    writeUInt8(out, this.statusBits);
+    writeInt32(out, (int) scaleToSignedRaw(this.temperature, 0.1d, -2147483648L, 2147483647L, "temperature"), ByteOrder.LITTLE_ENDIAN);
+    writeUInt16(out, (int) scaleToUnsignedRaw(this.voltage, 0.01d, 65535L, "voltage"), ByteOrder.BIG_ENDIAN);
+    writeInt16(out, (short) scaleToSignedRaw(this.reusableTemperature, 0.01d, -32768L, 32767L, "reusableTemperature"), ByteOrder.BIG_ENDIAN);
+    writeInt32(out, Float.floatToIntBits((float) this.reusableFloat), ByteOrder.BIG_ENDIAN);
     return out.toByteArray();
   }
 
@@ -21,9 +69,9 @@ public final class Header {
    * Decodes a message instance from a byte array.
    *
    * @param bytes encoded message bytes
-   * @return decoded Header value
+   * @return decoded TelemetryFrame value
    */
-  public static Header decode(byte[] bytes) {
+  public static TelemetryFrame decode(byte[] bytes) {
     Objects.requireNonNull(bytes, "bytes");
     return decode(ByteBuffer.wrap(bytes));
   }
@@ -32,13 +80,17 @@ public final class Header {
    * Decodes a message instance from a byte buffer.
    *
    * @param input buffer positioned at the start of this message
-   * @return decoded Header value
+   * @return decoded TelemetryFrame value
    */
-  public static Header decode(ByteBuffer input) {
+  public static TelemetryFrame decode(ByteBuffer input) {
     Objects.requireNonNull(input, "input");
-    Header value = new Header();
+    TelemetryFrame value = new TelemetryFrame();
     value.version = readUInt8(input);
-    value.sequence = readUInt16(input, ByteOrder.LITTLE_ENDIAN);
+    value.statusBits = readUInt8(input);
+    value.temperature = readInt32(input, ByteOrder.LITTLE_ENDIAN) * 0.1d;
+    value.voltage = readUInt16(input, ByteOrder.BIG_ENDIAN) * 0.01d;
+    value.reusableTemperature = readInt16(input, ByteOrder.BIG_ENDIAN) * 0.01d;
+    value.reusableFloat = Float.intBitsToFloat(readInt32(input, ByteOrder.BIG_ENDIAN));
     return value;
   }
 

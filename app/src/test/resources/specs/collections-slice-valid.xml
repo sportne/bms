@@ -2,7 +2,7 @@
 <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.collections">
   <array name="BytePair" elementType="uint8" length="2" comment="Two-byte reusable array"/>
   <vector name="ByteStream" elementType="uint8" comment="Reusable counted vector">
-    <countField ref="lengthField"/>
+    <countField ref="count"/>
   </vector>
   <vector name="PathVector" elementType="uint8" comment="Reusable path-terminated vector">
     <terminatorField name="root">

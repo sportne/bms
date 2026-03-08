@@ -4,6 +4,7 @@ import acme.telemetry.Header;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Objects;
 
 public final class Packet {
@@ -229,5 +230,115 @@ public final class Packet {
    */
   private static long readUInt64(ByteBuffer input, ByteOrder order) {
     return readInt64(input, order);
+  }
+
+  /**
+   * Validates a collection count value and converts it to an int.
+   *
+   * @param countValue decoded count value as long
+   * @param fieldName field name shown in exception text
+   * @return validated count value as int
+   */
+  private static int requireCount(long countValue, String fieldName) {
+    if (countValue < 0 || countValue > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "Count field " + fieldName + " must be between 0 and Integer.MAX_VALUE.");
+    }
+    return (int) countValue;
+  }
+
+  /**
+   * Validates an unsigned-64 count and converts it to an int.
+   *
+   * @param countValue raw unsigned-64 count bits
+   * @param fieldName field name shown in exception text
+   * @return validated count value as int
+   */
+  private static int requireCountUnsignedLong(long countValue, String fieldName) {
+    if (Long.compareUnsigned(countValue, Integer.toUnsignedLong(Integer.MAX_VALUE)) > 0) {
+      throw new IllegalArgumentException(
+          "Unsigned count field "
+              + fieldName
+              + " must be <= Integer.MAX_VALUE. Received "
+              + Long.toUnsignedString(countValue)
+              + '.');
+    }
+    return (int) countValue;
+  }
+
+  /**
+   * Converts a scaled logical value to a signed integer raw value.
+   *
+   * @param logicalValue logical floating-point value
+   * @param scale scaling factor from the schema
+   * @param minInclusive signed minimum raw value
+   * @param maxInclusive signed maximum raw value
+   * @param fieldName field/member name for exception text
+   * @return rounded raw integer value
+   */
+  private static long scaleToSignedRaw(
+      double logicalValue,
+      double scale,
+      long minInclusive,
+      long maxInclusive,
+      String fieldName) {
+    if (!Double.isFinite(logicalValue)) {
+      throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+    }
+    if (scale == 0.0d || !Double.isFinite(scale)) {
+      throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+    }
+
+    double rawValue = logicalValue / scale;
+    if (!Double.isFinite(rawValue)) {
+      throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+    }
+
+    if (rawValue < minInclusive || rawValue > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Value " + logicalValue + " is outside raw range for " + fieldName + '.');
+    }
+
+    long rounded = Math.round(rawValue);
+    if (rounded < minInclusive || rounded > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside raw range.");
+    }
+    return rounded;
+  }
+
+  /**
+   * Converts a scaled logical value to an unsigned integer raw value.
+   *
+   * @param logicalValue logical floating-point value
+   * @param scale scaling factor from the schema
+   * @param maxInclusive unsigned maximum raw value that fits in a signed long
+   * @param fieldName field/member name for exception text
+   * @return rounded raw integer value
+   */
+  private static long scaleToUnsignedRaw(
+      double logicalValue, double scale, long maxInclusive, String fieldName) {
+    if (!Double.isFinite(logicalValue)) {
+      throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+    }
+    if (scale == 0.0d || !Double.isFinite(scale)) {
+      throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+    }
+
+    double rawValue = logicalValue / scale;
+    if (!Double.isFinite(rawValue)) {
+      throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+    }
+    if (rawValue < 0.0d || rawValue > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Value " + logicalValue + " is outside unsigned raw range for " + fieldName + '.');
+    }
+
+    long rounded = Math.round(rawValue);
+    if (rounded < 0 || rounded > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside unsigned raw range.");
+    }
+    return rounded;
   }
 }
