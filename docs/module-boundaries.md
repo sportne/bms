@@ -3,7 +3,7 @@
 This project does not currently use Java Platform Module System (`module-info.java`).
 
 Why:
-- The project is early-stage and still changing quickly.
+- The project has a released `0.1.0` baseline and is now in a `1.0.0` hardening phase.
 - Keeping classpath setup simple makes local builds and tests easier for new contributors.
 - GraalVM compatibility goals are already met without JPMS right now.
 

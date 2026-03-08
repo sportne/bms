@@ -16,13 +16,16 @@ Java or C++ that follows the binary format exactly.
 
 ## Current status
 
-Near-parity `0.1.0` release candidate.
+`0.1.0` has been released.
+
+Current development is focused on `1.0.0` hardening work (compatibility policy,
+diagnostics quality, and release process maturity).
 
 The repository contains:
 - the BMS XML Schema (XSD)
 - compiler pipeline foundation (validate → parse → semantic resolve → generate)
 - architecture and semantic-model documentation
-- task lists for incremental milestones
+- consolidated task tracking and roadmap notes
 - runtime end-to-end tests that compile generated Java and C++ and run encode/decode checks
 - cross-language conformance tests that compare Java bytes and C++ bytes for the same fixture inputs
 
@@ -116,15 +119,16 @@ The spec now requires `schema@namespace` and allows `messageType@namespace` over
 
 ## Release targets
 
-- `0.1.0` target: near parity with working Java and C++ backend behavior plus runtime conformance checks.
+- `0.1.0` status: released with Java and C++ backend support and runtime conformance checks.
 - `1.0.0` target: hardening and stability (stronger compatibility guarantees and release process maturity).
 
 Roadmap and execution files:
 
 - [tasks/backlog.md](tasks/backlog.md)
 - [tasks/roadmap-1.0.0-hardening.md](tasks/roadmap-1.0.0-hardening.md)
-- [tasks/fixture-matrix-0.1.0.md](tasks/fixture-matrix-0.1.0.md)
-- [tasks/release-0.1.0-checklist.md](tasks/release-0.1.0-checklist.md)
+
+Historical `0.1.0` checklist and fixture-matrix task files were retired during
+task-tracker consolidation.
 
 CLI scope lock for `0.1.0`:
 

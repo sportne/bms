@@ -18,11 +18,11 @@ The current foundation supports a small but complete path:
 - XML parsing for conditional/string members (`varString`, `pad`, `checksum`, `if`, nested `type`)
 - semantic checks (namespaces, type references, duplicate names)
 - Java code generation
-- C++ scaffold generation
+- C++ code generation
 
 The parser still fails fast for truly unknown XML elements that are not part of the schema.
-The generators are intentionally narrower than the parser right now, so unsupported
-member kinds fail with clear diagnostics during `generate`.
+Current Java and C++ generators both support foundation, numeric, collection,
+and conditional members used by the fixture matrix.
 
 ## Why two models?
 

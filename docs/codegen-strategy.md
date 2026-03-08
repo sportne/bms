@@ -1,70 +1,44 @@
 # Code Generation Strategy
 
-## Principle
+## Goal
 
-Use a shared semantic model and independent language back ends.
+Generate readable, deterministic source code from the resolved BMS model.
 
-## Java output
+Deterministic means:
+- same input spec -> same output files
+- stable field order
+- no timestamps or random values in generated output
 
-Generate:
-- one type file per message
-- serializer/deserializer helpers
-- endian utility
-- checksum utility
+## Current back ends
 
-Possible package layout:
+The compiler currently generates:
+- Java source files
+- C++ header/source files
 
-```text
-com.example.generated.messages
-com.example.generated.runtime
-```
+Both back ends consume the resolved model only. They do not read XML directly.
 
-C++ output
+## Current feature coverage
 
-Generate:
+Java and C++ generation both cover:
+- foundation scalar/message members
+- numeric members (`bitField`, `float`, `scaledInt`)
+- collection members (`array`, `vector`, `blobArray`, `blobVector`)
+- conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`)
 
-header and source per message or grouped by spec
+If a spec breaks a supported contract (for example invalid checksum range or
+invalid conditional expression), generation fails with diagnostics instead of
+silently producing wrong code.
 
-runtime helpers for endian and checksum
+## Implementation style
 
-Possible layout:
+The project uses explicit programmatic emitters in Java.
 
-include/generated/
-src/generated/
-Templates vs programmatic generation
+Why:
+- keeps behavior easy to trace in code review
+- avoids reflection-heavy template engines
+- fits GraalVM-native compatibility goals
 
-Prefer templates for:
+## Rule to keep
 
-file structure
-
-repetitive method shapes
-
-comments
-
-Prefer programmatic generation for:
-
-offset calculations
-
-nested loops
-
-condition generation
-
-bit packing expressions
-
-V1 simplification
-
-Start with direct code generation for:
-
-primitive fields
-
-fixed arrays
-
-vectors with countField
-
-bitField flags and segments
-
-fixedString and varString
-
-checksum and pad
-
-Add more complex recursive and conditional cases once the golden tests are stable.
+Generators must preserve wire layout order from `messageType` declarations.
+Reordering members is not allowed unless schema semantics explicitly require it.

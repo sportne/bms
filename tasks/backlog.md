@@ -2,8 +2,8 @@
 
 This file is the single place to track what is still open.
 
-Detailed milestone and roadmap files still exist for context, but progress
-should be updated here first.
+Older milestone and release-checklist files were consolidated into this tracker.
+Update progress here first.
 
 ## Current release blockers (`0.1.0`)
 
@@ -25,7 +25,7 @@ should be updated here first.
 
 - [x] Address gradle deprecation warnings.
 - [ ] Demonstrate project with real world message specification.
-- [ ] Updating project documentation to reflect current project status.
+- [x] Updating project documentation to reflect current project status.
 - [ ] Create users guide / man page.
 - [ ] Setup code analysis on generated code to the same standard as the code in the project. Use clang-tidy and cppcheck as in `../cpp-helper-libs/`.
 - [ ] Wire up basic tests as part of check that use the natively compiled version of the application that only run when the correct toolchain (graalvm) are available.
@@ -49,6 +49,5 @@ should be updated here first.
 
 ## Supporting documents
 
-- Release checklist: `tasks/release-0.1.0-checklist.md`
-- `0.1.0` fixture matrix: `tasks/fixture-matrix-0.1.0.md`
+- Backlog tracker: `tasks/backlog.md`
 - `1.0.0` hardening roadmap: `tasks/roadmap-1.0.0-hardening.md`
