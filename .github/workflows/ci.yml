@@ -68,5 +68,5 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Build native image
-        run: ./gradlew :app:nativeCompile --no-daemon --no-configuration-cache
+      - name: Run Gradle check
+        run: ./gradlew check --warning-mode all --console=plain --no-daemon --no-configuration-cache

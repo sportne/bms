@@ -59,8 +59,36 @@ jacoco {
 
 test {
 	useJUnitPlatform()
+	filter {
+		excludeTestsMatching 'io.github.sportne.bms.cli.BmsCliNativeSmokeTest'
+	}
 	finalizedBy jacocoTestReport
 }
+
+def nativeExecutableName =
+		"bms${System.getProperty('os.name').toLowerCase().contains('win') ? '.exe' : ''}"
+def nativeExecutablePathProvider =
+		layout.buildDirectory.file("native/nativeCompile/${nativeExecutableName}")
+
+def nativeCliSmokeTest =
+		tasks.register('nativeCliSmokeTest', Test) {
+			description = 'Runs CLI smoke tests against the compiled native bms binary.'
+			group = 'verification'
+			useJUnitPlatform()
+			testClassesDirs = sourceSets.test.output.classesDirs
+			classpath = sourceSets.test.runtimeClasspath
+			dependsOn tasks.named('nativeCompile')
+			mustRunAfter tasks.named('test')
+			filter {
+				includeTestsMatching 'io.github.sportne.bms.cli.BmsCliNativeSmokeTest'
+			}
+			doFirst {
+				systemProperty(
+						'bms.native.executable',
+						nativeExecutablePathProvider.get().asFile.absolutePath
+						)
+			}
+		}
 
 jacocoTestReport {
 	dependsOn test
@@ -211,4 +239,10 @@ check {
 	dependsOn spotbugsGeneratedJava
 	dependsOn checkstyleMain
 	dependsOn checkstyleTest
+}
+
+if (providers.environmentVariable('GRAALVM_HOME').isPresent()) {
+	check {
+		dependsOn nativeCliSmokeTest
+	}
 }
