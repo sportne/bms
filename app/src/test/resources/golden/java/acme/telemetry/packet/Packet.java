@@ -342,4 +342,62 @@ public final class Packet {
     }
     return rounded;
   }
+
+  /**
+   * Converts a scaled logical value to one unsigned 64-bit raw value.
+   *
+   * <p>The returned {@code long} stores the same 64 raw bits as the wire value.
+   *
+   * @param logicalValue logical floating-point value
+   * @param scale scaling factor from the schema
+   * @param fieldName field/member name for exception text
+   * @return rounded raw unsigned-64 value encoded in one long
+   */
+  private static long scaleToUnsignedRaw64(double logicalValue, double scale, String fieldName) {
+    if (!Double.isFinite(logicalValue)) {
+      throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+    }
+    if (scale == 0.0d || !Double.isFinite(scale)) {
+      throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+    }
+
+    double rawValue = logicalValue / scale;
+    if (!Double.isFinite(rawValue)) {
+      throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+    }
+    if (rawValue < 0.0d) {
+      throw new IllegalArgumentException(
+          "Value " + logicalValue + " is outside unsigned raw range for " + fieldName + '.');
+    }
+
+    java.math.BigDecimal roundedDecimal =
+        java.math.BigDecimal.valueOf(rawValue).setScale(0, java.math.RoundingMode.HALF_UP);
+    java.math.BigInteger roundedInteger;
+    try {
+      roundedInteger = roundedDecimal.toBigIntegerExact();
+    } catch (ArithmeticException exception) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside unsigned raw range.");
+    }
+
+    java.math.BigInteger maxUnsigned = new java.math.BigInteger("18446744073709551615");
+    if (roundedInteger.signum() < 0 || roundedInteger.compareTo(maxUnsigned) > 0) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside unsigned raw range.");
+    }
+    return roundedInteger.longValue();
+  }
+
+  /**
+   * Converts one unsigned 64-bit raw value stored in a {@code long} to a {@code double}.
+   *
+   * @param value raw unsigned-64 value bits
+   * @return floating-point value in the unsigned-64 numeric range
+   */
+  private static double unsignedLongToDouble(long value) {
+    if (value >= 0L) {
+      return (double) value;
+    }
+    return ((double) (value & Long.MAX_VALUE)) + 0x1.0p63;
+  }
 }

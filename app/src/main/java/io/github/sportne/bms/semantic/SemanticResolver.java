@@ -42,7 +42,11 @@ import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
+import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
+import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
@@ -702,7 +706,8 @@ public final class SemanticResolver {
             ? schemaNamespace
             : parsedMessageType.namespaceOverride();
 
-    MessageResolutionState messageState = new MessageResolutionState();
+    MessageResolutionState messageState =
+        new MessageResolutionState(collectPrimitiveFieldTypes(parsedMessageType.members()));
     List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
     for (ParsedMessageMember member : parsedMessageType.members()) {
       ResolvedMessageMember resolvedMember =
@@ -772,6 +777,45 @@ public final class SemanticResolver {
     }
     return resolveNestedTypeMember(
         parsedMessageType, currentNamespace, (ParsedMessageType) member, messageState, context);
+  }
+
+  /**
+   * Builds one primitive-field lookup map for a parsed message member list.
+   *
+   * <p>This lookup is used by {@code if} condition validation.
+   *
+   * @param members parsed members to scan
+   * @return primitive field lookup map keyed by field name
+   */
+  private static Map<String, PrimitiveType> collectPrimitiveFieldTypes(
+      List<ParsedMessageMember> members) {
+    Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
+    collectPrimitiveFieldTypes(primitiveFieldByName, members);
+    return Map.copyOf(primitiveFieldByName);
+  }
+
+  /**
+   * Recursively collects primitive scalar field types from one member list.
+   *
+   * @param primitiveFieldByName destination lookup map
+   * @param members parsed members to scan
+   */
+  private static void collectPrimitiveFieldTypes(
+      Map<String, PrimitiveType> primitiveFieldByName, List<ParsedMessageMember> members) {
+    for (ParsedMessageMember member : members) {
+      if (member instanceof ParsedField parsedField) {
+        PrimitiveType primitiveType = PrimitiveType.fromSchemaName(parsedField.typeName());
+        if (primitiveType != null) {
+          primitiveFieldByName.putIfAbsent(parsedField.name(), primitiveType);
+        }
+      }
+      if (member instanceof ParsedIfBlock parsedIfBlock) {
+        collectPrimitiveFieldTypes(primitiveFieldByName, parsedIfBlock.members());
+      }
+      if (member instanceof ParsedMessageType parsedNestedType) {
+        collectPrimitiveFieldTypes(primitiveFieldByName, parsedNestedType.members());
+      }
+    }
   }
 
   /**
@@ -1151,12 +1195,21 @@ public final class SemanticResolver {
       ParsedIfBlock parsedIfBlock,
       MessageResolutionState messageState,
       ResolutionContext context) {
+    ResolvedIfCondition resolvedCondition = null;
     if (parsedIfBlock.test().isBlank()) {
       context.diagnostics.add(
           error(
               "SEMANTIC_INVALID_IF_TEST",
               "if@test must not be blank in message " + parsedMessageType.name() + ".",
               context.sourcePath));
+    } else {
+      resolvedCondition =
+          resolveIfCondition(
+              parsedMessageType.name(),
+              parsedIfBlock.test(),
+              messageState.primitiveFieldByName,
+              context.sourcePath,
+              context.diagnostics);
     }
     if (parsedIfBlock.members().isEmpty()) {
       context.diagnostics.add(
@@ -1167,7 +1220,8 @@ public final class SemanticResolver {
     }
 
     MessageResolutionState ifState =
-        new MessageResolutionState(messageState.previousPrimitiveFieldNames);
+        new MessageResolutionState(
+            messageState.previousPrimitiveFieldNames, messageState.primitiveFieldByName);
     List<ResolvedMessageMember> resolvedMembers = new ArrayList<>();
     for (ParsedMessageMember nestedMember : parsedIfBlock.members()) {
       ResolvedMessageMember resolvedMember =
@@ -1176,7 +1230,177 @@ public final class SemanticResolver {
         resolvedMembers.add(resolvedMember);
       }
     }
-    return new ResolvedIfBlock(parsedIfBlock.test(), resolvedMembers);
+    if (resolvedCondition == null) {
+      return null;
+    }
+    return new ResolvedIfBlock(resolvedCondition, resolvedMembers);
+  }
+
+  /**
+   * Parses and validates one textual {@code if} condition.
+   *
+   * @param messageName parent message name used in diagnostics
+   * @param conditionText raw condition text
+   * @param primitiveFieldByName primitive field lookup map
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return resolved condition tree, or {@code null} when invalid
+   */
+  private static ResolvedIfCondition resolveIfCondition(
+      String messageName,
+      String conditionText,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
+    IfConditionExpressionParser.ParsedCondition parsedCondition;
+    try {
+      parsedCondition = IfConditionExpressionParser.parse(conditionText);
+    } catch (IfConditionExpressionParser.IfConditionParseException exception) {
+      diagnostics.add(
+          error(
+              "SEMANTIC_INVALID_IF_TEST",
+              "if@test in message " + messageName + " is invalid: " + exception.getMessage(),
+              sourcePath));
+      return null;
+    }
+    return resolveIfConditionNode(
+        messageName, conditionText, parsedCondition, primitiveFieldByName, sourcePath, diagnostics);
+  }
+
+  /**
+   * Resolves one parsed condition node into a resolved node and validates semantic rules.
+   *
+   * @param messageName parent message name used in diagnostics
+   * @param conditionText raw condition text
+   * @param parsedCondition parsed condition node
+   * @param primitiveFieldByName primitive field lookup map
+   * @param sourcePath source path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @return resolved condition node, or {@code null} when invalid
+   */
+  private static ResolvedIfCondition resolveIfConditionNode(
+      String messageName,
+      String conditionText,
+      IfConditionExpressionParser.ParsedCondition parsedCondition,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      String sourcePath,
+      List<Diagnostic> diagnostics) {
+    if (parsedCondition instanceof IfConditionExpressionParser.ParsedComparisonCondition parsed) {
+      PrimitiveType primitiveType = primitiveFieldByName.get(parsed.fieldName());
+      if (primitiveType == null) {
+        diagnostics.add(
+            error(
+                "SEMANTIC_INVALID_IF_TEST",
+                "if@test in message "
+                    + messageName
+                    + " references unknown primitive field: "
+                    + parsed.fieldName()
+                    + ". Condition: "
+                    + conditionText,
+                sourcePath));
+        return null;
+      }
+      if (!fitsPrimitiveRange(parsed.literal(), primitiveType)) {
+        diagnostics.add(
+            error(
+                "SEMANTIC_INVALID_IF_TEST",
+                "if@test in message "
+                    + messageName
+                    + " uses literal out of range for field "
+                    + parsed.fieldName()
+                    + ": "
+                    + parsed.literal(),
+                sourcePath));
+        return null;
+      }
+      return new ResolvedIfComparison(
+          parsed.fieldName(), primitiveType, parsed.operator(), parsed.literal());
+    }
+    if (parsedCondition instanceof IfConditionExpressionParser.ParsedAndCondition parsedAnd) {
+      ResolvedIfCondition left =
+          resolveIfConditionNode(
+              messageName,
+              conditionText,
+              parsedAnd.left(),
+              primitiveFieldByName,
+              sourcePath,
+              diagnostics);
+      ResolvedIfCondition right =
+          resolveIfConditionNode(
+              messageName,
+              conditionText,
+              parsedAnd.right(),
+              primitiveFieldByName,
+              sourcePath,
+              diagnostics);
+      if (left == null || right == null) {
+        return null;
+      }
+      return new ResolvedIfAndCondition(left, right);
+    }
+
+    IfConditionExpressionParser.ParsedOrCondition parsedOr =
+        (IfConditionExpressionParser.ParsedOrCondition) parsedCondition;
+    ResolvedIfCondition left =
+        resolveIfConditionNode(
+            messageName,
+            conditionText,
+            parsedOr.left(),
+            primitiveFieldByName,
+            sourcePath,
+            diagnostics);
+    ResolvedIfCondition right =
+        resolveIfConditionNode(
+            messageName,
+            conditionText,
+            parsedOr.right(),
+            primitiveFieldByName,
+            sourcePath,
+            diagnostics);
+    if (left == null || right == null) {
+      return null;
+    }
+    return new ResolvedIfOrCondition(left, right);
+  }
+
+  /**
+   * Returns whether one numeric literal fits a primitive integer type.
+   *
+   * @param numericLiteral parsed literal value
+   * @param primitiveType target primitive type
+   * @return {@code true} when value fits the primitive range
+   */
+  private static boolean fitsPrimitiveRange(
+      BigInteger numericLiteral, PrimitiveType primitiveType) {
+    return switch (primitiveType) {
+      case UINT8 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(255));
+      case UINT16 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(65_535));
+      case UINT32 -> inRange(numericLiteral, BigInteger.ZERO, BigInteger.valueOf(4_294_967_295L));
+      case UINT64 -> inRange(
+          numericLiteral, BigInteger.ZERO, new BigInteger("18446744073709551615"));
+      case INT8 -> inRange(numericLiteral, BigInteger.valueOf(-128), BigInteger.valueOf(127));
+      case INT16 -> inRange(
+          numericLiteral, BigInteger.valueOf(-32_768), BigInteger.valueOf(32_767));
+      case INT32 -> inRange(
+          numericLiteral,
+          BigInteger.valueOf(Integer.MIN_VALUE),
+          BigInteger.valueOf(Integer.MAX_VALUE));
+      case INT64 -> inRange(
+          numericLiteral, BigInteger.valueOf(Long.MIN_VALUE), BigInteger.valueOf(Long.MAX_VALUE));
+    };
+  }
+
+  /**
+   * Returns whether one value is inside an inclusive range.
+   *
+   * @param value candidate value
+   * @param lowerInclusive inclusive lower bound
+   * @param upperInclusive inclusive upper bound
+   * @return {@code true} when value is within the range
+   */
+  private static boolean inRange(
+      BigInteger value, BigInteger lowerInclusive, BigInteger upperInclusive) {
+    return value.compareTo(lowerInclusive) >= 0 && value.compareTo(upperInclusive) <= 0;
   }
 
   /**
@@ -1655,21 +1879,27 @@ public final class SemanticResolver {
   private static final class MessageResolutionState {
     private final Set<String> namedMembers = new HashSet<>();
     private final Set<String> previousPrimitiveFieldNames = new HashSet<>();
+    private final Map<String, PrimitiveType> primitiveFieldByName;
 
     /**
-     * Creates an empty message-resolution state.
+     * Creates a top-level message-resolution state.
      *
-     * <p>Use this for full message scopes where no inherited count-field names are needed.
+     * @param primitiveFieldByName primitive field lookup map for if-condition validation
      */
-    private MessageResolutionState() {}
+    private MessageResolutionState(Map<String, PrimitiveType> primitiveFieldByName) {
+      this.primitiveFieldByName = Map.copyOf(primitiveFieldByName);
+    }
 
     /**
      * Creates a nested-scope state that inherits earlier primitive count-field names.
      *
      * @param inheritedCountFields primitive scalar field names visible to this nested scope
+     * @param primitiveFieldByName primitive field lookup map for if-condition validation
      */
-    private MessageResolutionState(Set<String> inheritedCountFields) {
+    private MessageResolutionState(
+        Set<String> inheritedCountFields, Map<String, PrimitiveType> primitiveFieldByName) {
       previousPrimitiveFieldNames.addAll(inheritedCountFields);
+      this.primitiveFieldByName = Map.copyOf(primitiveFieldByName);
     }
   }
 

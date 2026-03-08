@@ -32,7 +32,7 @@
     </varString>
     <pad bytes="1" comment="Pad byte"/>
 
-    <if field="version" operator="gte" value="2">
+    <if test="(version &gt;= 2 and version &lt; 10) or version == 42">
       <field name="modeValue" type="uint8" comment="Conditional mode value"/>
       <type name="ConditionalPayload" comment="Nested payload inside conditional block">
         <field name="nestedValue" type="uint16" comment="Conditional nested value"/>

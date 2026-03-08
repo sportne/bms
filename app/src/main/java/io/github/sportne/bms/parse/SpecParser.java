@@ -4,6 +4,7 @@ import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.IfComparisonOperator;
 import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
@@ -835,19 +836,15 @@ public final class SpecParser {
    */
   private String parseIfComparisonOperatorSymbol(
       Path specPath, XMLStreamReader reader, String operatorValue) throws BmsException {
-    return switch (operatorValue) {
-      case "eq" -> "==";
-      case "ne" -> "!=";
-      case "lt" -> "<";
-      case "lte" -> "<=";
-      case "gt" -> ">";
-      case "gte" -> ">=";
-      default -> throw parserError(
+    try {
+      return IfComparisonOperator.fromXmlToken(operatorValue).symbol();
+    } catch (IllegalArgumentException exception) {
+      throw parserError(
           specPath,
           reader,
           "PARSER_INVALID_ATTRIBUTE",
           "Unsupported if comparison operator value: " + operatorValue);
-    };
+    }
   }
 
   /**

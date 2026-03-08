@@ -17,7 +17,6 @@ import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
-import io.github.sportne.bms.model.resolved.ResolvedScaledInt;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorField;
 import io.github.sportne.bms.model.resolved.ResolvedTerminatorValueLength;
@@ -27,7 +26,6 @@ import io.github.sportne.bms.model.resolved.VarStringTypeRef;
 import io.github.sportne.bms.model.resolved.VectorTypeRef;
 import io.github.sportne.bms.testutil.TestSupport;
 import io.github.sportne.bms.util.BmsException;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -222,6 +220,10 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("if (((this.version & 0xFFL) <= 10L))"));
     assertTrue(actual.contains("if (((this.version & 0xFFL) > 1L))"));
     assertTrue(actual.contains("if (((this.version & 0xFFL) >= 1L))"));
+    assertTrue(actual.contains("&&"));
+    assertTrue(actual.contains("||"));
+    assertTrue(actual.contains("public short betweenMode;"));
+    assertTrue(actual.contains("public short compoundMode;"));
   }
 
   /** Contract: the coverage fixture drives extended float/scaled/collection Java branches. */
@@ -366,9 +368,7 @@ class JavaCodeGeneratorTest {
                 new ResolvedBlobVector(
                     "badBlobCountRef",
                     "bad blob count ref",
-                    new ResolvedCountFieldLength("blobCount")),
-                new ResolvedScaledInt(
-                    "badScaled64", PrimitiveType.UINT64, BigDecimal.ONE, null, "unsupported")));
+                    new ResolvedCountFieldLength("blobCount"))));
 
     ResolvedSchema schema = new ResolvedSchema("acme.telemetry", List.of(messageType));
 
@@ -391,48 +391,45 @@ class JavaCodeGeneratorTest {
         diagnosticsText.contains("badTerminatorRange(terminator literal out of range: 300)"));
     assertTrue(diagnosticsText.contains("badTerminatorLiteral(invalid terminator literal: GG)"));
     assertTrue(diagnosticsText.contains("badBlobCountRef(countField ref=\"blobCount\")"));
-    assertTrue(diagnosticsText.contains("ResolvedScaledInt(baseType=UINT64)"));
   }
 
-  /** Contract: unsupported if-expression syntax fails with a clear Java-generator diagnostic. */
+  /**
+   * Contract: legacy symbolic logical operators fail during semantic validation before generation.
+   */
   @Test
   void javaGeneratorFailsWithClearDiagnosticsForUnsupportedIfTestExpression() throws Exception {
-    JavaCodeGenerator generator = new JavaCodeGenerator();
-    ResolvedSchema schema = compileFixture("specs/conditional-if-unsupported-test.xml");
-
     BmsException exception =
-        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+        assertThrows(
+            BmsException.class, () -> compileFixture("specs/conditional-if-unsupported-test.xml"));
 
     String diagnosticsText =
         exception.diagnostics().stream()
             .map(diagnostic -> diagnostic.message())
             .collect(Collectors.joining("\n"));
-    assertTrue(diagnosticsText.contains("if(test=\"version > 1 && version < 10\")"));
+    assertTrue(diagnosticsText.contains("Use 'and' and 'or' instead"));
     assertTrue(
         exception.diagnostics().stream()
-            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_IF_TEST")));
   }
 
-  /** Contract: relational if@test literals still enforce primitive range checks. */
+  /**
+   * Contract: out-of-range relational literals fail during semantic validation before generation.
+   */
   @Test
   void javaGeneratorFailsWithClearDiagnosticsForOutOfRangeRelationalIfLiterals() throws Exception {
-    JavaCodeGenerator generator = new JavaCodeGenerator();
-    ResolvedSchema schema = compileFixture("specs/conditional-if-relational-invalid.xml");
-
     BmsException exception =
-        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+        assertThrows(
+            BmsException.class,
+            () -> compileFixture("specs/conditional-if-relational-invalid.xml"));
 
     String diagnosticsText =
         exception.diagnostics().stream()
             .map(diagnostic -> diagnostic.message())
             .collect(Collectors.joining("\n"));
-    assertTrue(diagnosticsText.contains("if(test=\"version < 300\") literal is out of range"));
-    assertTrue(diagnosticsText.contains("if(test=\"version <= 300\") literal is out of range"));
-    assertTrue(diagnosticsText.contains("if(test=\"version > 300\") literal is out of range"));
-    assertTrue(diagnosticsText.contains("if(test=\"version >= 300\") literal is out of range"));
+    assertTrue(diagnosticsText.contains("uses literal out of range for field version: 300"));
     assertTrue(
         exception.diagnostics().stream()
-            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+            .anyMatch(diagnostic -> diagnostic.code().equals("SEMANTIC_INVALID_IF_TEST")));
   }
 
   /** Contract: invalid checksum range syntax fails with a clear Java-generator diagnostic. */

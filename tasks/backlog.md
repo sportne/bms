@@ -10,7 +10,7 @@
 - [ ] Implement C++ backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
 - [ ] Implement C++ backend emission for conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`).
 - [x] Expand end-to-end specs so at least one example covers each supported front-end construct.
-- [ ] Expand Java `if@test` support to compound boolean expressions (`&&`, `||`) with deterministic precedence rules.
+- [x] Expand Java `if@test` support to compound boolean expressions (`and`, `or`) with deterministic precedence rules and explicit `&&`/`||` rejection diagnostics.
 
 ## P1
 

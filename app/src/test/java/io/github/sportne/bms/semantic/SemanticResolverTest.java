@@ -36,7 +36,10 @@ import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
 import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
+import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
+import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
+import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedVarString;
@@ -641,6 +644,7 @@ class SemanticResolverTest {
                     "frame",
                     null,
                     List.of(
+                        new ParsedField("version", "uint8", null, null, null, "version"),
                         new ParsedField("nameLength", "uint8", null, null, null, "name length"),
                         new ParsedVarString(
                             "name",
@@ -696,11 +700,11 @@ class SemanticResolverTest {
         message.fields().stream()
             .collect(java.util.stream.Collectors.toMap(field -> field.name(), field -> field));
     assertInstanceOf(VarStringTypeRef.class, fieldByName.get("label").typeRef());
-    assertTrue(message.members().get(1) instanceof ResolvedVarString);
-    assertTrue(message.members().get(3) instanceof ResolvedPad);
-    assertTrue(message.members().get(4) instanceof ResolvedChecksum);
-    assertTrue(message.members().get(5) instanceof ResolvedIfBlock);
-    assertTrue(message.members().get(6) instanceof ResolvedMessageType);
+    assertTrue(message.members().get(2) instanceof ResolvedVarString);
+    assertTrue(message.members().get(4) instanceof ResolvedPad);
+    assertTrue(message.members().get(5) instanceof ResolvedChecksum);
+    assertTrue(message.members().get(6) instanceof ResolvedIfBlock);
+    assertTrue(message.members().get(7) instanceof ResolvedMessageType);
   }
 
   /** Contract: varString count-field refs must target earlier primitive scalar fields. */
@@ -778,7 +782,7 @@ class SemanticResolverTest {
                     List.of(
                         new ParsedField("value", "uint8", null, null, null, "parent value"),
                         new ParsedIfBlock(
-                            "always",
+                            "value == 1",
                             List.of(
                                 new ParsedField(
                                     "value", "uint8", null, null, null, "if-scope value")))))));
@@ -787,6 +791,99 @@ class SemanticResolverTest {
 
     assertEquals(2, resolved.messageTypes().get(0).members().size());
     assertInstanceOf(ResolvedIfBlock.class, resolved.messageTypes().get(0).members().get(1));
+  }
+
+  /** Contract: text conditions use `and`/`or` precedence where `and` binds tighter than `or`. */
+  @Test
+  void semanticResolverParsesAndOrConditionsWithExpectedPrecedence() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("a", "uint8", null, null, null, "a"),
+                        new ParsedField("b", "uint8", null, null, null, "b"),
+                        new ParsedField("c", "uint8", null, null, null, "c"),
+                        new ParsedIfBlock(
+                            "a == 1 or b == 2 and c == 3",
+                            List.of(
+                                new ParsedField("value", "uint8", null, null, null, "value")))))));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+    ResolvedMessageType messageType = resolved.messageTypes().get(0);
+    ResolvedIfBlock ifBlock = (ResolvedIfBlock) messageType.members().get(3);
+
+    assertInstanceOf(ResolvedIfOrCondition.class, ifBlock.condition());
+    ResolvedIfOrCondition root = (ResolvedIfOrCondition) ifBlock.condition();
+    assertInstanceOf(ResolvedIfComparison.class, root.left());
+    assertEquals("a", ((ResolvedIfComparison) root.left()).fieldName());
+    assertInstanceOf(ResolvedIfAndCondition.class, root.right());
+  }
+
+  /** Contract: parentheses in text conditions override default `and`/`or` precedence. */
+  @Test
+  void semanticResolverParsesParenthesizedAndOrConditions() throws Exception {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("a", "uint8", null, null, null, "a"),
+                        new ParsedField("b", "uint8", null, null, null, "b"),
+                        new ParsedField("c", "uint8", null, null, null, "c"),
+                        new ParsedIfBlock(
+                            "(a == 1 or b == 2) and c == 3",
+                            List.of(
+                                new ParsedField("value", "uint8", null, null, null, "value")))))));
+
+    var resolved = new SemanticResolver().resolve(parsedSchema, "test.xml");
+    ResolvedMessageType messageType = resolved.messageTypes().get(0);
+    ResolvedIfBlock ifBlock = (ResolvedIfBlock) messageType.members().get(3);
+
+    assertInstanceOf(ResolvedIfAndCondition.class, ifBlock.condition());
+    ResolvedIfAndCondition root = (ResolvedIfAndCondition) ifBlock.condition();
+    assertInstanceOf(ResolvedIfOrCondition.class, root.left());
+    assertInstanceOf(ResolvedIfComparison.class, root.right());
+    assertEquals("c", ((ResolvedIfComparison) root.right()).fieldName());
+  }
+
+  /** Contract: legacy `&&`/`||` text operators are rejected with a semantic diagnostic. */
+  @Test
+  void semanticResolverRejectsLegacyLogicalSymbolsInTextConditions() {
+    ParsedSchema parsedSchema =
+        new ParsedSchema(
+            "acme.telemetry",
+            List.of(
+                new ParsedMessageType(
+                    "Frame",
+                    "frame",
+                    null,
+                    List.of(
+                        new ParsedField("a", "uint8", null, null, null, "a"),
+                        new ParsedField("b", "uint8", null, null, null, "b"),
+                        new ParsedIfBlock(
+                            "a == 1 && b == 2",
+                            List.of(
+                                new ParsedField("value", "uint8", null, null, null, "value")))))));
+
+    BmsException exception =
+        assertThrows(
+            BmsException.class, () -> new SemanticResolver().resolve(parsedSchema, "test.xml"));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(
+                diagnostic ->
+                    diagnostic.code().equals("SEMANTIC_INVALID_IF_TEST")
+                        && diagnostic.message().contains("Use 'and' and 'or' instead")));
   }
 
   /** Contract: duplicate reusable names are rejected across all reusable collection/type groups. */

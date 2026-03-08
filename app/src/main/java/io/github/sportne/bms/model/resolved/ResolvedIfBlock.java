@@ -6,20 +6,20 @@ import java.util.Objects;
 /**
  * Resolved representation of a conditional {@code if} block.
  *
- * @param test condition expression text
+ * @param condition resolved condition expression tree
  * @param members resolved members inside the conditional block, in declaration order
  */
-public record ResolvedIfBlock(String test, List<ResolvedMessageMember> members)
+public record ResolvedIfBlock(ResolvedIfCondition condition, List<ResolvedMessageMember> members)
     implements ResolvedMessageMember {
 
   /**
    * Creates a resolved conditional block.
    *
-   * @param test condition expression text
+   * @param condition resolved condition expression tree
    * @param members resolved members in declaration order
    */
   public ResolvedIfBlock {
-    test = Objects.requireNonNull(test, "test");
+    condition = Objects.requireNonNull(condition, "condition");
     members = List.copyOf(Objects.requireNonNull(members, "members"));
   }
 }

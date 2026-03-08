@@ -4,6 +4,7 @@ import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.IfComparisonOperator;
 import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
@@ -23,7 +24,11 @@ import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
+import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
+import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
+import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
@@ -57,7 +62,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.regex.Pattern;
 
 /**
  * Generates Java source files from the resolved model.
@@ -67,9 +71,6 @@ import java.util.regex.Pattern;
  * conditional members.
  */
 public final class JavaCodeGenerator {
-  private static final Pattern IF_TEST_PATTERN =
-      Pattern.compile("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(==|!=|<=|>=|<|>)\\s*([^\\s]+)\\s*$");
-
   private static final String SHARED_IO_HELPERS =
       """
       /**
@@ -367,6 +368,64 @@ public final class JavaCodeGenerator {
               "Rounded value for " + fieldName + " is outside unsigned raw range.");
         }
         return rounded;
+      }
+
+      /**
+       * Converts a scaled logical value to one unsigned 64-bit raw value.
+       *
+       * <p>The returned {@code long} stores the same 64 raw bits as the wire value.
+       *
+       * @param logicalValue logical floating-point value
+       * @param scale scaling factor from the schema
+       * @param fieldName field/member name for exception text
+       * @return rounded raw unsigned-64 value encoded in one long
+       */
+      private static long scaleToUnsignedRaw64(double logicalValue, double scale, String fieldName) {
+        if (!Double.isFinite(logicalValue)) {
+          throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+        }
+        if (scale == 0.0d || !Double.isFinite(scale)) {
+          throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+        }
+
+        double rawValue = logicalValue / scale;
+        if (!Double.isFinite(rawValue)) {
+          throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+        }
+        if (rawValue < 0.0d) {
+          throw new IllegalArgumentException(
+              "Value " + logicalValue + " is outside unsigned raw range for " + fieldName + '.');
+        }
+
+        java.math.BigDecimal roundedDecimal =
+            java.math.BigDecimal.valueOf(rawValue).setScale(0, java.math.RoundingMode.HALF_UP);
+        java.math.BigInteger roundedInteger;
+        try {
+          roundedInteger = roundedDecimal.toBigIntegerExact();
+        } catch (ArithmeticException exception) {
+          throw new IllegalArgumentException(
+              "Rounded value for " + fieldName + " is outside unsigned raw range.");
+        }
+
+        java.math.BigInteger maxUnsigned = new java.math.BigInteger("18446744073709551615");
+        if (roundedInteger.signum() < 0 || roundedInteger.compareTo(maxUnsigned) > 0) {
+          throw new IllegalArgumentException(
+              "Rounded value for " + fieldName + " is outside unsigned raw range.");
+        }
+        return roundedInteger.longValue();
+      }
+
+      /**
+       * Converts one unsigned 64-bit raw value stored in a {@code long} to a {@code double}.
+       *
+       * @param value raw unsigned-64 value bits
+       * @return floating-point value in the unsigned-64 numeric range
+       */
+      private static double unsignedLongToDouble(long value) {
+        if (value >= 0L) {
+          return (double) value;
+        }
+        return ((double) (value & Long.MAX_VALUE)) + 0x1.0p63;
       }
       """
           .indent(2)
@@ -973,18 +1032,6 @@ public final class JavaCodeGenerator {
       Map<String, PrimitiveType> primitiveFieldByName,
       Path outputPath,
       List<Diagnostic> diagnostics) {
-    IfCondition ifCondition = parseIfCondition(resolvedIfBlock.test());
-    if (ifCondition == null) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "if(test=\"" + resolvedIfBlock.test() + "\")",
-              outputPath.toString()));
-    } else {
-      validateIfConditionLiteral(
-          ifCondition, messageType, primitiveFieldByName, outputPath, diagnostics);
-    }
-
     for (ResolvedMessageMember nestedMember : resolvedIfBlock.members()) {
       checkMemberSupport(
           nestedMember,
@@ -1021,39 +1068,6 @@ public final class JavaCodeGenerator {
           primitiveFieldByName,
           outputPath,
           diagnostics);
-    }
-  }
-
-  /**
-   * Validates one parsed if-condition literal against the referenced primitive field type.
-   *
-   * @param ifCondition parsed condition components
-   * @param messageType parent message type
-   * @param primitiveFieldByName primitive field lookup map
-   * @param outputPath output path used in diagnostics
-   * @param diagnostics destination diagnostics list
-   */
-  private static void validateIfConditionLiteral(
-      IfCondition ifCondition,
-      ResolvedMessageType messageType,
-      Map<String, PrimitiveType> primitiveFieldByName,
-      Path outputPath,
-      List<Diagnostic> diagnostics) {
-    PrimitiveType primitiveType = primitiveFieldByName.get(ifCondition.fieldName());
-    if (primitiveType == null) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "if(test=\"" + ifCondition.rawTest() + "\") field was not found",
-              outputPath.toString()));
-      return;
-    }
-    if (!fitsPrimitiveRange(ifCondition.literal(), primitiveType)) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "if(test=\"" + ifCondition.rawTest() + "\") literal is out of range",
-              outputPath.toString()));
     }
   }
 
@@ -1373,13 +1387,7 @@ public final class JavaCodeGenerator {
       ResolvedScaledInt resolvedScaledInt,
       ResolvedMessageType messageType,
       Path outputPath,
-      List<Diagnostic> diagnostics) {
-    if (resolvedScaledInt.baseType() == PrimitiveType.UINT64) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(), "ResolvedScaledInt(baseType=UINT64)", outputPath.toString()));
-    }
-  }
+      List<Diagnostic> diagnostics) {}
 
   /**
    * Checks support for one array definition.
@@ -1677,9 +1685,9 @@ public final class JavaCodeGenerator {
     }
 
     if (elementTypeRef instanceof ScaledIntTypeRef scaledIntTypeRef) {
-      ResolvedScaledInt resolvedScaledInt =
-          generationContext.reusableScaledIntByName().get(scaledIntTypeRef.scaledIntTypeName());
-      return resolvedScaledInt != null && resolvedScaledInt.baseType() != PrimitiveType.UINT64;
+      return generationContext
+          .reusableScaledIntByName()
+          .containsKey(scaledIntTypeRef.scaledIntTypeName());
     }
 
     return false;
@@ -2902,11 +2910,11 @@ public final class JavaCodeGenerator {
           .append(order)
           .append(");\n");
       case UINT64 -> builder
-          .append("    writeUInt64(out, (long) scaleToUnsignedRaw(")
+          .append("    writeUInt64(out, scaleToUnsignedRaw64(")
           .append(valueExpression)
           .append(", ")
           .append(scaleLiteral)
-          .append(", Long.MAX_VALUE, \"")
+          .append(", \"")
           .append(fieldName)
           .append("\"), ")
           .append(order)
@@ -3450,8 +3458,7 @@ public final class JavaCodeGenerator {
       ResolvedMessageType messageType,
       GenerationContext generationContext,
       Map<String, PrimitiveType> primitiveFieldByName) {
-    String conditionExpression =
-        ifConditionExpression(resolvedIfBlock.test(), "this.", primitiveFieldByName);
+    String conditionExpression = ifConditionExpression(resolvedIfBlock.condition(), "this.");
     builder.append("    if (").append(conditionExpression).append(") {\n");
     appendEncodeMembers(
         builder, resolvedIfBlock.members(), messageType, generationContext, primitiveFieldByName);
@@ -3970,9 +3977,9 @@ public final class JavaCodeGenerator {
       case UINT64 -> builder
           .append("    ")
           .append(targetExpression)
-          .append(" = readUInt64(input, ")
+          .append(" = unsignedLongToDouble(readUInt64(input, ")
           .append(order)
-          .append(") * ")
+          .append(")) * ")
           .append(scaleLiteral)
           .append(";\n");
     }
@@ -4577,8 +4584,7 @@ public final class JavaCodeGenerator {
       ResolvedMessageType messageType,
       GenerationContext generationContext,
       Map<String, PrimitiveType> primitiveFieldByName) {
-    String conditionExpression =
-        ifConditionExpression(resolvedIfBlock.test(), "value.", primitiveFieldByName);
+    String conditionExpression = ifConditionExpression(resolvedIfBlock.condition(), "value.");
     builder.append("    if (").append(conditionExpression).append(") {\n");
     appendDecodeMembers(
         builder, resolvedIfBlock.members(), messageType, generationContext, primitiveFieldByName);
@@ -4743,75 +4749,72 @@ public final class JavaCodeGenerator {
   }
 
   /**
-   * Parses one if-condition expression.
+   * Resolves and renders one if-condition expression for generated Java code.
    *
-   * <p>The supported syntax is one field compared with one numeric literal using {@code ==}, {@code
-   * !=}, {@code <}, {@code <=}, {@code >}, or {@code >=}.
-   *
-   * @param test raw if@test text
-   * @return parsed condition, or {@code null} when unsupported
+   * @param condition resolved condition tree
+   * @param ownerPrefix expression prefix for the owning value ({@code this.} or {@code value.})
+   * @return Java boolean expression that evaluates the condition
    */
-  private static IfCondition parseIfCondition(String test) {
-    java.util.regex.Matcher matcher = IF_TEST_PATTERN.matcher(test);
-    if (!matcher.matches()) {
-      return null;
+  private static String ifConditionExpression(ResolvedIfCondition condition, String ownerPrefix) {
+    if (condition instanceof ResolvedIfComparison comparison) {
+      return comparisonExpression(comparison, ownerPrefix);
     }
-
-    try {
-      return new IfCondition(
-          test, matcher.group(1), matcher.group(2), parseNumericLiteral(matcher.group(3)));
-    } catch (NumberFormatException exception) {
-      return null;
+    if (condition instanceof ResolvedIfAndCondition andCondition) {
+      return "("
+          + ifConditionExpression(andCondition.left(), ownerPrefix)
+          + " && "
+          + ifConditionExpression(andCondition.right(), ownerPrefix)
+          + ")";
     }
+    ResolvedIfOrCondition orCondition = (ResolvedIfOrCondition) condition;
+    return "("
+        + ifConditionExpression(orCondition.left(), ownerPrefix)
+        + " || "
+        + ifConditionExpression(orCondition.right(), ownerPrefix)
+        + ")";
   }
 
   /**
-   * Resolves and renders one if-condition expression for generated Java code.
+   * Renders one primitive comparison node into Java code.
    *
-   * @param test raw if@test expression
+   * @param comparison resolved comparison node
    * @param ownerPrefix expression prefix for the owning value ({@code this.} or {@code value.})
-   * @param primitiveFieldByName primitive field lookup map
-   * @return Java boolean expression that evaluates the condition
+   * @return Java boolean expression for the comparison
    */
-  private static String ifConditionExpression(
-      String test, String ownerPrefix, Map<String, PrimitiveType> primitiveFieldByName) {
-    IfCondition ifCondition = parseIfCondition(test);
-    if (ifCondition == null) {
-      throw new IllegalStateException("Unsupported if@test expression: " + test);
-    }
-    PrimitiveType primitiveType = primitiveFieldByName.get(ifCondition.fieldName());
-    if (primitiveType == null) {
-      throw new IllegalStateException("if@test references unknown primitive field: " + test);
-    }
-
-    String fieldExpression = ownerPrefix + ifCondition.fieldName();
-    if (primitiveType == PrimitiveType.UINT64) {
+  private static String comparisonExpression(ResolvedIfComparison comparison, String ownerPrefix) {
+    String fieldExpression = ownerPrefix + comparison.fieldName();
+    if (comparison.fieldType() == PrimitiveType.UINT64) {
       return "(Long.compareUnsigned("
           + fieldExpression
           + ", Long.parseUnsignedLong(\""
-          + ifCondition.literal()
+          + comparison.literal()
           + "\")) "
-          + unsignedLongComparisonSuffix(ifCondition.operator())
+          + unsignedLongComparisonSuffix(comparison.operator())
           + ")";
     }
     return "("
-        + countExpression(fieldExpression, primitiveType)
+        + countExpression(fieldExpression, comparison.fieldType())
         + " "
-        + signedLongComparisonOperator(ifCondition.operator())
+        + signedLongComparisonOperator(comparison.operator())
         + " "
-        + ifCondition.literal()
+        + comparison.literal()
         + "L)";
   }
 
   /**
    * Converts a parsed operator to the Java operator used for signed long comparisons.
    *
-   * @param operator parsed operator from {@code if@test}
+   * @param operator comparison operator
    * @return Java operator for signed long comparison
    */
-  private static String signedLongComparisonOperator(String operator) {
+  private static String signedLongComparisonOperator(IfComparisonOperator operator) {
     return switch (operator) {
-      case "==", "!=", "<", "<=", ">", ">=" -> operator;
+      case EQ -> "==";
+      case NE -> "!=";
+      case LT -> "<";
+      case LTE -> "<=";
+      case GT -> ">";
+      case GTE -> ">=";
       default -> throw new IllegalStateException("Unsupported operator: " + operator);
     };
   }
@@ -4819,17 +4822,17 @@ public final class JavaCodeGenerator {
   /**
    * Converts a parsed operator to the suffix used with {@link Long#compareUnsigned(long, long)}.
    *
-   * @param operator parsed operator from {@code if@test}
+   * @param operator comparison operator
    * @return Java comparison suffix, for example {@code == 0} or {@code < 0}
    */
-  private static String unsignedLongComparisonSuffix(String operator) {
+  private static String unsignedLongComparisonSuffix(IfComparisonOperator operator) {
     return switch (operator) {
-      case "==" -> "== 0";
-      case "!=" -> "!= 0";
-      case "<" -> "< 0";
-      case "<=" -> "<= 0";
-      case ">" -> "> 0";
-      case ">=" -> ">= 0";
+      case EQ -> "== 0";
+      case NE -> "!= 0";
+      case LT -> "< 0";
+      case LTE -> "<= 0";
+      case GT -> "> 0";
+      case GTE -> ">= 0";
       default -> throw new IllegalStateException("Unsupported operator: " + operator);
     };
   }
@@ -4953,18 +4956,6 @@ public final class JavaCodeGenerator {
    * @param endInclusive last byte index (inclusive)
    */
   private record ChecksumRange(int startInclusive, int endInclusive) {}
-
-  /**
-   * Parsed if-condition components.
-   *
-   * @param rawTest original if@test text
-   * @param fieldName referenced field name
-   * @param operator supported operator ({@code ==}, {@code !=}, {@code <}, {@code <=}, {@code >},
-   *     or {@code >=})
-   * @param literal parsed numeric literal
-   */
-  private record IfCondition(
-      String rawTest, String fieldName, String operator, BigInteger literal) {}
 
   /** Immutable lookup maps used while rendering one schema. */
   private record GenerationContext(

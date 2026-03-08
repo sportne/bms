@@ -191,14 +191,14 @@ class SpecParserTest {
     assertEquals(2, parsedSchema.reusablePads().get(0).bytes());
 
     var message = parsedSchema.messageTypes().get(0);
-    assertEquals(7, message.members().size());
-    assertTrue(message.members().get(1) instanceof ParsedVarString);
-    assertTrue(message.members().get(3) instanceof ParsedPad);
-    assertTrue(message.members().get(4) instanceof ParsedChecksum);
-    assertTrue(message.members().get(5) instanceof ParsedIfBlock);
-    assertTrue(message.members().get(6) instanceof ParsedMessageType);
+    assertEquals(8, message.members().size());
+    assertTrue(message.members().get(2) instanceof ParsedVarString);
+    assertTrue(message.members().get(4) instanceof ParsedPad);
+    assertTrue(message.members().get(5) instanceof ParsedChecksum);
+    assertTrue(message.members().get(6) instanceof ParsedIfBlock);
+    assertTrue(message.members().get(7) instanceof ParsedMessageType);
 
-    ParsedIfBlock ifBlock = (ParsedIfBlock) message.members().get(5);
+    ParsedIfBlock ifBlock = (ParsedIfBlock) message.members().get(6);
     assertEquals("version == 1", ifBlock.test());
     assertEquals(3, ifBlock.members().size());
     assertTrue(ifBlock.members().get(1) instanceof ParsedVarString);

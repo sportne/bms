@@ -131,6 +131,78 @@ class JavaGeneratedRuntimeE2ETest {
     }
   }
 
+  /** Contract: generated decode rejects modified bytes when crc16 checksum no longer matches. */
+  @Test
+  void generatedJavaDecodeRejectsTamperedCrc16Checksum() throws Exception {
+    assertTamperedChecksumRejected(
+        "specs/checksum-crc16-valid.xml",
+        "acme.telemetry.conditional.algorithms.ChecksumCrc16Frame",
+        "crc16",
+        "0..1");
+  }
+
+  /** Contract: generated decode rejects modified bytes when crc32 checksum no longer matches. */
+  @Test
+  void generatedJavaDecodeRejectsTamperedCrc32Checksum() throws Exception {
+    assertTamperedChecksumRejected(
+        "specs/checksum-crc32-valid.xml",
+        "acme.telemetry.conditional.algorithms.ChecksumCrc32Frame",
+        "crc32",
+        "0..1");
+  }
+
+  /** Contract: generated decode rejects modified bytes when crc64 checksum no longer matches. */
+  @Test
+  void generatedJavaDecodeRejectsTamperedCrc64Checksum() throws Exception {
+    assertTamperedChecksumRejected(
+        "specs/checksum-crc64-valid.xml",
+        "acme.telemetry.conditional.algorithms.ChecksumCrc64Frame",
+        "crc64",
+        "0..1");
+  }
+
+  /**
+   * Contract: when a compound `if` condition is false, conditional members are skipped in
+   * encode/decode.
+   */
+  @Test
+  void generatedJavaSkipsCompoundConditionalMembersWhenConditionIsFalse() throws Exception {
+    ResolvedSchema schema = compileFixture("specs/java-e2e-all-supported-valid.xml");
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    Path sourceDirectory = tempDir.resolve("generated-src-condition-false");
+    Path classDirectory = tempDir.resolve("generated-classes-condition-false");
+
+    generator.generate(schema, sourceDirectory);
+
+    try (URLClassLoader classLoader = compileGeneratedSources(sourceDirectory, classDirectory)) {
+      Class<?> messageClass = classLoader.loadClass("acme.telemetry.e2e.AllSupportedFrame");
+      Object source = messageClass.getDeclaredConstructor().newInstance();
+
+      setFieldValue(source, "version", (short) 1);
+      setFieldValue(source, "count", (short) 1);
+      setFieldValue(source, "nameLength", (short) 4);
+      setFieldValue(source, "statusBits", (short) 1);
+      setFieldValue(source, "ratio", 1.0d);
+      setFieldValue(source, "temperature", 20.0d);
+      setArrayField(source, "fixedValues", new long[] {1, 1});
+      setArrayField(source, "samples", new long[] {1});
+      setFieldValue(source, "payload", new byte[] {1, 2, 3});
+      setFieldValue(source, "tail", new byte[] {4, 5});
+      setFieldValue(source, "title", "ABCD");
+      setFieldValue(source, "alwaysValue", (short) 3);
+
+      Method encodeMethod = messageClass.getMethod("encode");
+      byte[] encoded = (byte[]) encodeMethod.invoke(source);
+
+      Method decodeMethod = messageClass.getMethod("decode", byte[].class);
+      Object decoded = decodeMethod.invoke(null, encoded);
+      assertEquals((short) 1, readNumberField(decoded, "version").shortValue());
+      assertEquals((short) 0, readNumberField(decoded, "modeValue").shortValue());
+      assertEquals(0, readNumberField(decoded, "nestedValue").intValue());
+      assertEquals((short) 3, readNumberField(decoded, "alwaysValue").shortValue());
+    }
+  }
+
   /**
    * Compiles one XML fixture all the way to the resolved model.
    *
@@ -141,6 +213,53 @@ class JavaGeneratedRuntimeE2ETest {
   private static ResolvedSchema compileFixture(String resourcePath) throws Exception {
     BmsCompiler compiler = new BmsCompiler(TestSupport.repositoryXsdPath());
     return compiler.compile(TestSupport.resourcePath(resourcePath));
+  }
+
+  /**
+   * Generates, compiles, and executes one fixture to verify tampered checksum detection.
+   *
+   * @param fixtureResource classpath resource path to the XML fixture
+   * @param generatedClassName fully qualified generated Java message class name
+   * @param algorithmName checksum algorithm expected in the error message
+   * @param rangeText checksum range expected in the error message
+   * @throws Exception if generation or runtime invocation fails unexpectedly
+   */
+  private void assertTamperedChecksumRejected(
+      String fixtureResource, String generatedClassName, String algorithmName, String rangeText)
+      throws Exception {
+    ResolvedSchema schema = compileFixture(fixtureResource);
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    String fixtureStem =
+        fixtureResource
+            .replace("specs/", "")
+            .replace(".xml", "")
+            .replace('-', '_')
+            .replace('/', '_');
+    Path sourceDirectory = tempDir.resolve("generated-src-" + fixtureStem);
+    Path classDirectory = tempDir.resolve("generated-classes-" + fixtureStem);
+
+    generator.generate(schema, sourceDirectory);
+
+    try (URLClassLoader classLoader = compileGeneratedSources(sourceDirectory, classDirectory)) {
+      Class<?> messageClass = classLoader.loadClass(generatedClassName);
+      Object source = messageClass.getDeclaredConstructor().newInstance();
+      setFieldValue(source, "version", (short) 2);
+      setFieldValue(source, "payload", (short) 7);
+
+      Method encodeMethod = messageClass.getMethod("encode");
+      byte[] encoded = (byte[]) encodeMethod.invoke(source);
+      encoded[0] = (byte) (encoded[0] + 1);
+
+      Method decodeMethod = messageClass.getMethod("decode", byte[].class);
+      InvocationTargetException invocationTargetException =
+          assertThrows(InvocationTargetException.class, () -> decodeMethod.invoke(null, encoded));
+      assertTrue(invocationTargetException.getCause() instanceof IllegalArgumentException);
+      assertTrue(
+          invocationTargetException
+              .getCause()
+              .getMessage()
+              .contains("Checksum mismatch for " + algorithmName + " range " + rangeText + "."));
+    }
   }
 
   /**

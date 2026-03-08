@@ -82,7 +82,9 @@ Current Java backend conditional notes:
   - preferred structured form: `field`, `operator`, `value` (with enum operators `eq`, `ne`, `lt`, `lte`, `gt`, `gte`)
   - legacy text form: `test="field OP literal"`
 - both forms currently support `==`, `!=`, `<`, `<=`, `>`, and `>=` with numeric literals
-- compound boolean expressions in `if@test` (for example `&&` or `||`) are still rejected with clear diagnostics
+- text `if@test` supports compound boolean expressions using `and` and `or`
+- legacy symbolic boolean operators `&&` and `||` are rejected with clear migration diagnostics
+- precedence in text `if@test` is `and` before `or`; use parentheses to override precedence
 - members inside `if` and nested `type` are emitted as fields on the generated class in wire order
 - flattened member names must be unique after expansion or generation fails with diagnostics
 

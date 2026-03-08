@@ -351,7 +351,7 @@ class BmsCliTest {
   }
 
   @Test
-  /** Contract: unsupported if-expression syntax still fails clearly in Java generation. */
+  /** Contract: legacy symbolic logical operators fail with semantic diagnostics. */
   void generateCommandReturnsSpecErrorForUnsupportedIfTestExpression() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
@@ -371,10 +371,7 @@ class BmsCliTest {
             new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
 
     assertEquals(1, exitCode);
-    assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+    assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("SEMANTIC_INVALID_IF_TEST"));
   }
 
   @Test
@@ -458,7 +455,7 @@ class BmsCliTest {
             .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
   }
 
-  /** Contract: out-of-range relational if@test literals fail clearly during generation. */
+  /** Contract: out-of-range relational if@test literals fail semantic validation. */
   @Test
   void generateCommandReturnsSpecErrorForOutOfRangeRelationalIfLiterals() {
     BmsCli cli = new BmsCli();
@@ -479,10 +476,7 @@ class BmsCliTest {
             new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
 
     assertEquals(1, exitCode);
-    assertTrue(
-        stderrBuffer
-            .toString(StandardCharsets.UTF_8)
-            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+    assertTrue(stderrBuffer.toString(StandardCharsets.UTF_8).contains("SEMANTIC_INVALID_IF_TEST"));
   }
 
   @Test

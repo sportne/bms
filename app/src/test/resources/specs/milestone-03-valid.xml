@@ -7,6 +7,7 @@
   <pad bytes="2" comment="Reusable pad"/>
 
   <messageType name="FrontendThreeFrame" comment="Covers varString, pad, checksum, if, and type">
+    <field name="version" type="uint8" comment="Version used by the conditional block"/>
     <field name="nameLength" type="uint8" comment="Length prefix for deviceName"/>
     <varString name="deviceName" encoding="utf8" comment="Device display name">
       <countField ref="nameLength"/>
