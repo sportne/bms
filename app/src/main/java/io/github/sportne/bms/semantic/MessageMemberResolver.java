@@ -78,11 +78,12 @@ final class MessageMemberResolver {
    *
    * @param typeName type name from XML
    * @param ownerContext owning context used in diagnostics
+   * @param ownerNode parsed owner node used for source-path provenance
    * @param context shared semantic-resolution state
    * @return resolved type reference, or {@code null} when unresolved
    */
   static ResolvedTypeRef resolveTypeRef(
-      String typeName, String ownerContext, ResolutionContext context) {
+      String typeName, String ownerContext, Object ownerNode, ResolutionContext context) {
     PrimitiveType primitiveType = PrimitiveType.fromSchemaName(typeName);
     if (primitiveType != null) {
       return new PrimitiveTypeRef(primitiveType);
@@ -116,7 +117,7 @@ final class MessageMemberResolver {
         SemanticValidationRules.error(
             "SEMANTIC_UNKNOWN_TYPE",
             "Unknown type in " + ownerContext + ": " + typeName,
-            context.sourcePath));
+            context.sourcePathFor(ownerNode)));
     return null;
   }
 
@@ -261,11 +262,12 @@ final class MessageMemberResolver {
       ParsedField parsedField,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedField);
     SemanticValidationRules.validateIdentifier(
         parsedField.name(),
         "SEMANTIC_INVALID_FIELD_NAME",
         "Field name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     if (!messageContext.namedMembers.add(parsedField.name())) {
       context.diagnostics.add(
@@ -275,11 +277,11 @@ final class MessageMemberResolver {
                   + parsedMessageType.name()
                   + ": "
                   + parsedField.name(),
-              context.sourcePath));
+              sourcePath));
     }
 
     ResolvedTypeRef typeRef =
-        resolveTypeRef(parsedField.typeName(), parsedMessageType.name(), context);
+        resolveTypeRef(parsedField.typeName(), parsedMessageType.name(), parsedField, context);
     if (typeRef == null) {
       return null;
     }
@@ -310,10 +312,14 @@ final class MessageMemberResolver {
       ParsedBitField parsedBitField,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedBitField);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedBitField.name(), messageContext.namedMembers, context);
-    return BitFieldResolver.resolveBitField(
-        parsedBitField, context.sourcePath, context.diagnostics);
+        parsedMessageType.name(),
+        parsedBitField.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
+    return BitFieldResolver.resolveBitField(parsedBitField, sourcePath, context.diagnostics);
   }
 
   /**
@@ -330,16 +336,20 @@ final class MessageMemberResolver {
       ParsedFloat parsedFloat,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedFloat);
     SemanticValidationRules.validateIdentifier(
         parsedFloat.name(),
         "SEMANTIC_INVALID_FLOAT_NAME",
         "Float name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedFloat.name(), messageContext.namedMembers, context);
-    SemanticValidationRules.validateFloatScaleRules(
-        parsedFloat, context.sourcePath, context.diagnostics);
+        parsedMessageType.name(),
+        parsedFloat.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
+    SemanticValidationRules.validateFloatScaleRules(parsedFloat, sourcePath, context.diagnostics);
 
     return new ResolvedFloat(
         parsedFloat.name(),
@@ -364,14 +374,19 @@ final class MessageMemberResolver {
       ParsedScaledInt parsedScaledInt,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedScaledInt);
     SemanticValidationRules.validateIdentifier(
         parsedScaledInt.name(),
         "SEMANTIC_INVALID_SCALED_INT_NAME",
         "ScaledInt name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedScaledInt.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedScaledInt.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     PrimitiveType baseType = PrimitiveType.fromSchemaName(parsedScaledInt.baseTypeName());
     if (baseType == null) {
@@ -382,7 +397,7 @@ final class MessageMemberResolver {
                   + parsedMessageType.name()
                   + ": "
                   + parsedScaledInt.baseTypeName(),
-              context.sourcePath));
+              sourcePath));
       return null;
     }
 
@@ -408,19 +423,25 @@ final class MessageMemberResolver {
       ParsedArray parsedArray,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedArray);
     SemanticValidationRules.validateIdentifier(
         parsedArray.name(),
         "SEMANTIC_INVALID_ARRAY_NAME",
         "Array name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedArray.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedArray.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     ResolvedTypeRef elementTypeRef =
         resolveTypeRef(
             parsedArray.elementTypeName(),
             "array " + parsedArray.name() + " in message " + parsedMessageType.name(),
+            parsedArray,
             context);
     if (elementTypeRef == null) {
       return null;
@@ -448,25 +469,31 @@ final class MessageMemberResolver {
       ParsedVector parsedVector,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedVector);
     SemanticValidationRules.validateIdentifier(
         parsedVector.name(),
         "SEMANTIC_INVALID_VECTOR_NAME",
         "Vector name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedVector.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedVector.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     ResolvedTypeRef elementTypeRef =
         resolveTypeRef(
             parsedVector.elementTypeName(),
             "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
+            parsedVector,
             context);
     ResolvedLengthMode lengthMode =
         LengthModeResolver.resolveLengthMode(
             parsedVector.lengthMode(),
             "vector " + parsedVector.name() + " in message " + parsedMessageType.name(),
-            context.sourcePath,
+            sourcePath,
             context.diagnostics,
             messageContext.previousPrimitiveFieldNames,
             true,
@@ -497,14 +524,19 @@ final class MessageMemberResolver {
       ParsedBlobArray parsedBlobArray,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedBlobArray);
     SemanticValidationRules.validateIdentifier(
         parsedBlobArray.name(),
         "SEMANTIC_INVALID_BLOB_ARRAY_NAME",
         "blobArray name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedBlobArray.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedBlobArray.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     return new ResolvedBlobArray(
         parsedBlobArray.name(), parsedBlobArray.length(), parsedBlobArray.comment());
@@ -524,20 +556,25 @@ final class MessageMemberResolver {
       ParsedBlobVector parsedBlobVector,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedBlobVector);
     SemanticValidationRules.validateIdentifier(
         parsedBlobVector.name(),
         "SEMANTIC_INVALID_BLOB_VECTOR_NAME",
         "blobVector name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedBlobVector.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedBlobVector.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     ResolvedLengthMode lengthMode =
         LengthModeResolver.resolveLengthMode(
             parsedBlobVector.lengthMode(),
             "blobVector " + parsedBlobVector.name() + " in message " + parsedMessageType.name(),
-            context.sourcePath,
+            sourcePath,
             context.diagnostics,
             messageContext.previousPrimitiveFieldNames,
             true,
@@ -563,20 +600,25 @@ final class MessageMemberResolver {
       ParsedVarString parsedVarString,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedVarString);
     SemanticValidationRules.validateIdentifier(
         parsedVarString.name(),
         "SEMANTIC_INVALID_VAR_STRING_NAME",
         "varString name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), parsedVarString.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        parsedVarString.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     ResolvedLengthMode lengthMode =
         LengthModeResolver.resolveLengthMode(
             parsedVarString.lengthMode(),
             "varString " + parsedVarString.name() + " in message " + parsedMessageType.name(),
-            context.sourcePath,
+            sourcePath,
             context.diagnostics,
             messageContext.previousPrimitiveFieldNames,
             true,
@@ -626,20 +668,21 @@ final class MessageMemberResolver {
       ParsedIfBlock parsedIfBlock,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(parsedIfBlock);
     ResolvedIfCondition resolvedCondition = null;
     if (parsedIfBlock.test().isBlank()) {
       context.diagnostics.add(
           SemanticValidationRules.error(
               "SEMANTIC_INVALID_IF_TEST",
               "if@test must not be blank in message " + parsedMessageType.name() + ".",
-              context.sourcePath));
+              sourcePath));
     } else {
       resolvedCondition =
           ConditionSemanticValidator.resolveIfCondition(
               parsedMessageType.name(),
               parsedIfBlock.test(),
               messageContext.primitiveFieldByName,
-              context.sourcePath,
+              sourcePath,
               context.diagnostics);
     }
     if (parsedIfBlock.members().isEmpty()) {
@@ -647,7 +690,7 @@ final class MessageMemberResolver {
           SemanticValidationRules.error(
               "SEMANTIC_EMPTY_IF_BLOCK",
               "if block in message " + parsedMessageType.name() + " must contain members.",
-              context.sourcePath));
+              sourcePath));
     }
 
     MessageResolutionContext ifContext =
@@ -684,21 +727,23 @@ final class MessageMemberResolver {
       ParsedMessageType nestedType,
       MessageResolutionContext messageContext,
       ResolutionContext context) {
+    String sourcePath = context.sourcePathFor(nestedType);
     SemanticValidationRules.validateIdentifier(
         nestedType.name(),
         "SEMANTIC_INVALID_NESTED_TYPE_NAME",
         "Nested type name must be a valid identifier in message " + parsedMessageType.name() + ": ",
-        context.sourcePath,
+        sourcePath,
         context.diagnostics);
     registerDuplicateMemberName(
-        parsedMessageType.name(), nestedType.name(), messageContext.namedMembers, context);
+        parsedMessageType.name(),
+        nestedType.name(),
+        messageContext.namedMembers,
+        sourcePath,
+        context);
 
     if (nestedType.namespaceOverride() != null) {
       SemanticValidationRules.validateNamespace(
-          nestedType.namespaceOverride(),
-          "type@namespace",
-          context.sourcePath,
-          context.diagnostics);
+          nestedType.namespaceOverride(), "type@namespace", sourcePath, context.diagnostics);
     }
     if (nestedType.members().isEmpty()) {
       context.diagnostics.add(
@@ -709,7 +754,7 @@ final class MessageMemberResolver {
                   + " in message "
                   + parsedMessageType.name()
                   + " must contain members.",
-              context.sourcePath));
+              sourcePath));
     }
 
     return resolveMessageType(currentNamespace, nestedType, context);
@@ -721,19 +766,21 @@ final class MessageMemberResolver {
    * @param messageTypeName parent message name
    * @param memberName member name being registered
    * @param knownMemberNames previously seen names in this message
+   * @param sourcePath source path for the member being registered
    * @param context shared semantic-resolution state
    */
   private static void registerDuplicateMemberName(
       String messageTypeName,
       String memberName,
       Set<String> knownMemberNames,
+      String sourcePath,
       ResolutionContext context) {
     if (!knownMemberNames.add(memberName)) {
       context.diagnostics.add(
           SemanticValidationRules.error(
               "SEMANTIC_DUPLICATE_MEMBER_NAME",
               "Duplicate member name in message " + messageTypeName + ": " + memberName,
-              context.sourcePath));
+              sourcePath));
     }
   }
 }

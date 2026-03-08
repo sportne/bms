@@ -348,12 +348,17 @@
     <xs:attribute name="comment" type="xs:string" use="required"/>
   </xs:complexType>
 
+  <xs:complexType name="importRef">
+    <xs:attribute name="path" type="xs:string" use="required"/>
+  </xs:complexType>
+
   <!-- =================================================== -->
   <!--  ROOT                                                -->
   <!-- =================================================== -->
   <xs:element name="schema">
     <xs:complexType>
       <xs:sequence>
+        <xs:element name="import" type="importRef" minOccurs="0" maxOccurs="unbounded"/>
         <xs:choice minOccurs="1" maxOccurs="unbounded">
           <xs:element name="messageType" type="messageType"/>
           <xs:element name="bitField" type="bitField"/>

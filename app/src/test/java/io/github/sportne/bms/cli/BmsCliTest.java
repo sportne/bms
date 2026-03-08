@@ -169,6 +169,28 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` accepts multiple root specs in one invocation. */
+  void validateCommandReturnsSuccessForMultipleSpecPaths() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate",
+              TestSupport.resourcePath("specs/valid-foundation.xml").toString(),
+              TestSupport.resourcePath("specs/numeric-slice-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
     BmsCli cli = new BmsCli();
@@ -677,6 +699,35 @@ class BmsCliTest {
     assertTrue(Files.exists(javaOutputDir.resolve("acme/telemetry/packet/Packet.java")));
     assertTrue(Files.exists(cppOutputDir.resolve("acme/telemetry/Header.hpp")));
     assertTrue(Files.exists(cppOutputDir.resolve("acme/telemetry/packet/Packet.cpp")));
+  }
+
+  @Test
+  /**
+   * Contract: `generate` accepts multiple root specs and emits output for all resolved messages.
+   */
+  void generateCommandProducesOutputForMultipleSpecPaths() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-multi");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/valid-foundation.xml").toString(),
+              TestSupport.resourcePath("specs/numeric-slice-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(Files.exists(javaOutputDir.resolve("acme/telemetry/Header.java")));
+    assertTrue(Files.exists(javaOutputDir.resolve("acme/telemetry/numeric/TelemetryFrame.java")));
   }
 
   @Test

@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -34,6 +35,8 @@ final class ResolutionContext {
   final Map<String, ParsedBlobVector> reusableBlobVectorByName;
   final Map<String, ParsedVarString> reusableVarStringByName;
   final Set<String> globalTypeNames;
+  final Map<String, String> firstSourcePathByGlobalTypeName;
+  private final Map<Object, String> sourcePathByNode;
 
   /**
    * Creates a fresh context for one schema resolution pass.
@@ -41,7 +44,18 @@ final class ResolutionContext {
    * @param sourcePath human-readable source path used in diagnostics
    */
   ResolutionContext(String sourcePath) {
+    this(sourcePath, Map.of());
+  }
+
+  /**
+   * Creates a fresh context for one schema resolution pass with per-node source provenance.
+   *
+   * @param sourcePath fallback source path used when node-level provenance is unavailable
+   * @param sourcePathByNode source path lookup keyed by parsed definition/member object
+   */
+  ResolutionContext(String sourcePath, Map<Object, String> sourcePathByNode) {
     this.sourcePath = sourcePath;
+    this.sourcePathByNode = Objects.requireNonNull(sourcePathByNode, "sourcePathByNode");
     diagnostics = new ArrayList<>();
     messageTypeByName = new LinkedHashMap<>();
     reusableFloatByName = new LinkedHashMap<>();
@@ -52,5 +66,21 @@ final class ResolutionContext {
     reusableBlobVectorByName = new LinkedHashMap<>();
     reusableVarStringByName = new LinkedHashMap<>();
     globalTypeNames = new HashSet<>();
+    firstSourcePathByGlobalTypeName = new LinkedHashMap<>();
+  }
+
+  /**
+   * Returns the best source path for one parsed node.
+   *
+   * <p>Falls back to the context-level source path when no node mapping exists.
+   *
+   * @param node parsed object used by diagnostics
+   * @return source path string for diagnostics
+   */
+  String sourcePathFor(Object node) {
+    if (node == null) {
+      return sourcePath;
+    }
+    return sourcePathByNode.getOrDefault(node, sourcePath);
   }
 }

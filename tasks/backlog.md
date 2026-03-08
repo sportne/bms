@@ -29,7 +29,7 @@ Update progress here first.
 - [ ] Create users guide / man page.
 - [x] Setup code analysis on generated code to the same standard as the code in the project. Use clang-tidy and cppcheck as in `../cpp-helper-libs/`.
 - [x] Wire up basic tests as part of check that use the natively compiled version of the application that only run when the correct toolchain (graalvm) are available.
-- [ ] Ensure the project allows message specifications spanning multiple XML files, especially where messages can be defined in one xml and used in another.
+- [x] Ensure the project allows message specifications spanning multiple XML files, especially where messages can be defined in one xml and used in another.
 
 ## Later enhancements
 

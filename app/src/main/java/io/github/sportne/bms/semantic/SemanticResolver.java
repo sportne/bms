@@ -5,6 +5,7 @@ import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.util.BmsException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Converts parsed XML objects into resolved objects used by generators.
@@ -24,9 +25,27 @@ public final class SemanticResolver {
    * @throws BmsException if one or more semantic errors are found
    */
   public ResolvedSchema resolve(ParsedSchema parsedSchema, String sourcePath) throws BmsException {
-    ResolutionContext context = new ResolutionContext(sourcePath);
+    return resolve(parsedSchema, sourcePath, Map.of());
+  }
+
+  /**
+   * Builds the resolved schema with optional per-node source provenance.
+   *
+   * @param parsedSchema parsed schema produced by the parser
+   * @param sourcePath fallback source path used in diagnostics
+   * @param sourcePathByNode optional provenance map keyed by parsed node object
+   * @return resolved schema ready for code generation
+   * @throws BmsException if one or more semantic errors are found
+   */
+  public ResolvedSchema resolve(
+      ParsedSchema parsedSchema, String sourcePath, Map<Object, String> sourcePathByNode)
+      throws BmsException {
+    ResolutionContext context = new ResolutionContext(sourcePath, sourcePathByNode);
     SemanticValidationRules.validateNamespace(
-        parsedSchema.namespace(), "schema@namespace", context.sourcePath, context.diagnostics);
+        parsedSchema.namespace(),
+        "schema@namespace",
+        context.sourcePathFor(parsedSchema),
+        context.diagnostics);
     TypeRegistryBuilder.registerSchemaLevelTypes(parsedSchema, context);
 
     ReusableTypeResolver.ReusableResolution reusableResolution =

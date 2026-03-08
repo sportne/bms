@@ -88,8 +88,8 @@ final class ReusableTypeResolver {
       List<ParsedFloat> reusableFloats, ResolutionContext context) {
     List<ResolvedFloat> resolvedReusableFloats = new ArrayList<>();
     for (ParsedFloat parsedFloat : reusableFloats) {
-      SemanticValidationRules.validateFloatScaleRules(
-          parsedFloat, context.sourcePath, context.diagnostics);
+      String sourcePath = context.sourcePathFor(parsedFloat);
+      SemanticValidationRules.validateFloatScaleRules(parsedFloat, sourcePath, context.diagnostics);
       resolvedReusableFloats.add(
           new ResolvedFloat(
               parsedFloat.name(),
@@ -113,13 +113,14 @@ final class ReusableTypeResolver {
       List<ParsedScaledInt> reusableScaledInts, ResolutionContext context) {
     List<ResolvedScaledInt> resolvedReusableScaledInts = new ArrayList<>();
     for (ParsedScaledInt parsedScaledInt : reusableScaledInts) {
+      String sourcePath = context.sourcePathFor(parsedScaledInt);
       PrimitiveType baseType = PrimitiveType.fromSchemaName(parsedScaledInt.baseTypeName());
       if (baseType == null) {
         context.diagnostics.add(
             SemanticValidationRules.error(
                 "SEMANTIC_INVALID_SCALED_INT_BASE_TYPE",
                 "Invalid scaledInt baseType: " + parsedScaledInt.baseTypeName(),
-                context.sourcePath));
+                sourcePath));
         continue;
       }
       resolvedReusableScaledInts.add(
@@ -146,7 +147,10 @@ final class ReusableTypeResolver {
     for (ParsedArray parsedArray : reusableArrays) {
       ResolvedTypeRef elementTypeRef =
           MessageMemberResolver.resolveTypeRef(
-              parsedArray.elementTypeName(), "reusable array " + parsedArray.name(), context);
+              parsedArray.elementTypeName(),
+              "reusable array " + parsedArray.name(),
+              parsedArray,
+              context);
       if (elementTypeRef == null) {
         continue;
       }
@@ -172,14 +176,18 @@ final class ReusableTypeResolver {
       List<ParsedVector> reusableVectors, ResolutionContext context) {
     List<ResolvedVector> resolvedReusableVectors = new ArrayList<>();
     for (ParsedVector parsedVector : reusableVectors) {
+      String sourcePath = context.sourcePathFor(parsedVector);
       ResolvedTypeRef elementTypeRef =
           MessageMemberResolver.resolveTypeRef(
-              parsedVector.elementTypeName(), "reusable vector " + parsedVector.name(), context);
+              parsedVector.elementTypeName(),
+              "reusable vector " + parsedVector.name(),
+              parsedVector,
+              context);
       ResolvedLengthMode lengthMode =
           LengthModeResolver.resolveLengthMode(
               parsedVector.lengthMode(),
               "reusable vector " + parsedVector.name(),
-              context.sourcePath,
+              sourcePath,
               context.diagnostics,
               Collections.emptySet(),
               false,
@@ -226,11 +234,12 @@ final class ReusableTypeResolver {
       List<ParsedBlobVector> reusableBlobVectors, ResolutionContext context) {
     List<ResolvedBlobVector> resolvedReusableBlobVectors = new ArrayList<>();
     for (ParsedBlobVector parsedBlobVector : reusableBlobVectors) {
+      String sourcePath = context.sourcePathFor(parsedBlobVector);
       ResolvedLengthMode lengthMode =
           LengthModeResolver.resolveLengthMode(
               parsedBlobVector.lengthMode(),
               "reusable blobVector " + parsedBlobVector.name(),
-              context.sourcePath,
+              sourcePath,
               context.diagnostics,
               Collections.emptySet(),
               false,
@@ -255,11 +264,12 @@ final class ReusableTypeResolver {
       List<ParsedVarString> reusableVarStrings, ResolutionContext context) {
     List<ResolvedVarString> resolvedReusableVarStrings = new ArrayList<>();
     for (ParsedVarString parsedVarString : reusableVarStrings) {
+      String sourcePath = context.sourcePathFor(parsedVarString);
       ResolvedLengthMode lengthMode =
           LengthModeResolver.resolveLengthMode(
               parsedVarString.lengthMode(),
               "reusable varString " + parsedVarString.name(),
-              context.sourcePath,
+              sourcePath,
               context.diagnostics,
               Collections.emptySet(),
               false,
@@ -318,18 +328,23 @@ final class ReusableTypeResolver {
   private static List<ResolvedBitField> resolveReusableBitFields(
       List<ParsedBitField> reusableBitFields, ResolutionContext context) {
     Set<String> reusableBitFieldNames = new HashSet<>();
+    java.util.Map<String, String> firstSourcePathByName = new java.util.LinkedHashMap<>();
     List<ResolvedBitField> resolvedReusableBitFields = new ArrayList<>();
     for (ParsedBitField parsedBitField : reusableBitFields) {
+      String sourcePath = context.sourcePathFor(parsedBitField);
+      firstSourcePathByName.putIfAbsent(parsedBitField.name(), sourcePath);
       if (!reusableBitFieldNames.add(parsedBitField.name())) {
         context.diagnostics.add(
             SemanticValidationRules.error(
                 "SEMANTIC_DUPLICATE_ROOT_BIT_FIELD_NAME",
-                "Duplicate schema-level bitField name: " + parsedBitField.name(),
-                context.sourcePath));
+                "Duplicate schema-level bitField name: "
+                    + parsedBitField.name()
+                    + ". First defined in: "
+                    + firstSourcePathByName.get(parsedBitField.name()),
+                sourcePath));
       }
       resolvedReusableBitFields.add(
-          BitFieldResolver.resolveBitField(
-              parsedBitField, context.sourcePath, context.diagnostics));
+          BitFieldResolver.resolveBitField(parsedBitField, sourcePath, context.diagnostics));
     }
     return resolvedReusableBitFields;
   }

@@ -6,6 +6,7 @@ import io.github.sportne.bms.model.parsed.ParsedBlobArray;
 import io.github.sportne.bms.model.parsed.ParsedBlobVector;
 import io.github.sportne.bms.model.parsed.ParsedChecksum;
 import io.github.sportne.bms.model.parsed.ParsedFloat;
+import io.github.sportne.bms.model.parsed.ParsedImport;
 import io.github.sportne.bms.model.parsed.ParsedMessageType;
 import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
@@ -80,6 +81,20 @@ final class RootElementParser {
   private void parseRootChild(
       Path specPath, XMLStreamReader reader, RootItemsBuilder rootItemsBuilder)
       throws XMLStreamException, BmsException {
+    if ("import".equals(reader.getLocalName())) {
+      if (rootItemsBuilder.encounteredNonImportChild) {
+        throw ParserSupport.parserError(
+            specPath,
+            reader,
+            "PARSER_IMPORT_NOT_ROOT_FIRST",
+            "All <import> elements must appear before non-import root elements.");
+      }
+      String importPath = ParserSupport.requireAttribute(specPath, reader, "path");
+      ParserSupport.expectNoNestedElements(specPath, reader, "import");
+      rootItemsBuilder.imports.add(new ParsedImport(importPath));
+      return;
+    }
+    rootItemsBuilder.encounteredNonImportChild = true;
     RootElementHandler rootElementHandler = rootElementHandlers.get(reader.getLocalName());
     if (rootElementHandler == null) {
       throw ParserSupport.unsupportedElement(specPath, reader, "root");
@@ -165,6 +180,8 @@ final class RootElementParser {
 
   /** Mutable root-item accumulator used while scanning schema children. */
   private static final class RootItemsBuilder {
+    private final List<ParsedImport> imports = new ArrayList<>();
+    private boolean encounteredNonImportChild;
     private final List<ParsedMessageType> messageTypes = new ArrayList<>();
     private final List<ParsedBitField> bitFields = new ArrayList<>();
     private final List<ParsedFloat> floats = new ArrayList<>();
@@ -187,6 +204,7 @@ final class RootElementParser {
      */
     private RootItems build() {
       return new RootItems(
+          imports,
           messageTypes,
           bitFields,
           floats,
@@ -204,6 +222,7 @@ final class RootElementParser {
   /**
    * Grouped root-level parse output.
    *
+   * @param imports parsed root imports
    * @param messageTypes parsed root message types
    * @param bitFields parsed reusable bitfields
    * @param floats parsed reusable floats
@@ -217,6 +236,7 @@ final class RootElementParser {
    * @param pads parsed reusable pads
    */
   record RootItems(
+      List<ParsedImport> imports,
       List<ParsedMessageType> messageTypes,
       List<ParsedBitField> bitFields,
       List<ParsedFloat> floats,

@@ -17,6 +17,7 @@ import io.github.sportne.bms.model.parsed.ParsedMessageType;
 import io.github.sportne.bms.model.parsed.ParsedPad;
 import io.github.sportne.bms.model.parsed.ParsedScaledInt;
 import io.github.sportne.bms.model.parsed.ParsedSchema;
+import io.github.sportne.bms.model.parsed.ParsedSpecDocument;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorField;
 import io.github.sportne.bms.model.parsed.ParsedTerminatorMatch;
 import io.github.sportne.bms.model.parsed.ParsedVarString;
@@ -197,6 +198,33 @@ class SpecParserSupportedSliceTest {
     try {
       ParsedSchema parsedSchema = parser.parse(specPath);
       assertEquals("uint8", parsedSchema.messageTypes().get(0).fields().get(0).typeName());
+    } finally {
+      Files.deleteIfExists(specPath);
+    }
+  }
+
+  @Test
+  void parserReadsRootImportsInDeclarationOrder() throws Exception {
+    SpecParser parser = new SpecParser();
+    String xml =
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
+          <import path="shared-types.xml"/>
+          <import path="collections.xml"/>
+          <messageType name="Frame" comment="frame">
+            <field name="version" type="uint8" comment="version"/>
+          </messageType>
+        </schema>
+        """;
+
+    Path specPath = writeTempSpec(xml);
+    try {
+      ParsedSpecDocument parsedSpecDocument = parser.parseDocument(specPath);
+      assertEquals(2, parsedSpecDocument.imports().size());
+      assertEquals("shared-types.xml", parsedSpecDocument.imports().get(0).path());
+      assertEquals("collections.xml", parsedSpecDocument.imports().get(1).path());
+      assertEquals(1, parsedSpecDocument.schema().messageTypes().size());
     } finally {
       Files.deleteIfExists(specPath);
     }

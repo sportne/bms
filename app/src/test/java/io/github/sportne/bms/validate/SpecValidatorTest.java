@@ -142,4 +142,48 @@ class SpecValidatorTest {
         validator.validate(malformedSpec).stream()
             .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
   }
+
+  /** Contract: schema-level imports are valid when they appear before root definitions. */
+  @Test
+  void importElementIsValidWhenDeclaredBeforeOtherRootElements() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = tempDir.resolve("import-root-first.xml");
+    Files.writeString(
+        specPath,
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
+          <import path="shared.xml"/>
+          <messageType name="Frame" comment="frame">
+            <field name="version" type="uint8" comment="version"/>
+          </messageType>
+        </schema>
+        """);
+
+    validator.validateOrThrow(specPath);
+  }
+
+  /** Contract: schema-level imports fail XSD validation when declared after other root elements. */
+  @Test
+  void importElementFailsWhenDeclaredAfterOtherRootElements() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = tempDir.resolve("import-after-message.xml");
+    Files.writeString(
+        specPath,
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
+          <messageType name="Frame" comment="frame">
+            <field name="version" type="uint8" comment="version"/>
+          </messageType>
+          <import path="shared.xml"/>
+        </schema>
+        """);
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> validator.validateOrThrow(specPath));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
+  }
 }

@@ -8,6 +8,8 @@ import io.github.sportne.bms.util.BmsException;
 import io.github.sportne.bms.validate.SpecValidator;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Runs the BMS front-end pipeline.
@@ -57,9 +59,23 @@ public final class BmsCompiler {
    * @throws BmsException if validation, parsing, or semantic checks fail
    */
   public ResolvedSchema compile(Path specPath) throws BmsException {
-    specValidator.validateOrThrow(specPath);
-    ParsedSchema parsedSchema = specParser.parse(specPath);
-    return semanticResolver.resolve(parsedSchema, specPath.toString());
+    return compile(List.of(specPath));
+  }
+
+  /**
+   * Runs the front-end pipeline for one or more root spec files.
+   *
+   * @param specPaths ordered root XML spec paths
+   * @return resolved schema ready for code generation
+   * @throws BmsException if validation, parsing, import loading, or semantic checks fail
+   */
+  public ResolvedSchema compile(List<Path> specPaths) throws BmsException {
+    SpecProjectLoader.LoadedProject loadedProject =
+        new SpecProjectLoader(specValidator, specParser).load(specPaths);
+    ParsedSchema parsedSchema = loadedProject.parsedSchema();
+    Map<Object, String> sourcePathByNode = loadedProject.sourcePathByNode();
+    String defaultSourcePath = specPaths.get(0).toAbsolutePath().normalize().toString();
+    return semanticResolver.resolve(parsedSchema, defaultSourcePath, sourcePathByNode);
   }
 
   /** Finds the default XSD path by walking up from the current working directory. */

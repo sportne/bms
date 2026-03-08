@@ -273,6 +273,24 @@ class SpecParserFailureDiagnosticsTest {
   }
 
   @Test
+  void parserRejectsImportDeclaredAfterNonImportRootElement() throws Exception {
+    SpecParser parser = new SpecParser();
+    String xml =
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry">
+          <messageType name="Frame" comment="frame">
+            <field name="version" type="uint8" comment="version"/>
+          </messageType>
+          <import path="shared.xml"/>
+        </schema>
+        """;
+
+    BmsException exception = parseInlineXmlExpectingFailure(parser, xml);
+    assertHasDiagnostic(exception, "PARSER_IMPORT_NOT_ROOT_FIRST");
+  }
+
+  @Test
   void parserRejectsVectorMissingLengthModeChild() throws Exception {
     SpecParser parser = new SpecParser();
     String xml =

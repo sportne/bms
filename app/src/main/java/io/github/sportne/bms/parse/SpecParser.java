@@ -1,6 +1,7 @@
 package io.github.sportne.bms.parse;
 
 import io.github.sportne.bms.model.parsed.ParsedSchema;
+import io.github.sportne.bms.model.parsed.ParsedSpecDocument;
 import io.github.sportne.bms.util.BmsException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,6 +41,17 @@ public final class SpecParser {
    * @throws BmsException if reading or parsing fails
    */
   public ParsedSchema parse(Path specPath) throws BmsException {
+    return parseDocument(specPath).schema();
+  }
+
+  /**
+   * Parses one XML spec file into the parsed document layer.
+   *
+   * @param specPath path to the XML spec file
+   * @return parsed document (schema plus root imports)
+   * @throws BmsException if reading or parsing fails
+   */
+  public ParsedSpecDocument parseDocument(Path specPath) throws BmsException {
     try (InputStream inputStream = Files.newInputStream(specPath)) {
       XMLStreamReader reader = inputFactory.createXMLStreamReader(inputStream);
       try {
@@ -52,19 +64,21 @@ public final class SpecParser {
         String schemaNamespace = ParserSupport.requireAttribute(specPath, reader, "namespace");
         RootElementParser.RootItems rootItems =
             rootElementParser.parseRootChildren(specPath, reader);
-        return new ParsedSchema(
-            schemaNamespace,
-            rootItems.messageTypes(),
-            rootItems.bitFields(),
-            rootItems.floats(),
-            rootItems.scaledInts(),
-            rootItems.arrays(),
-            rootItems.vectors(),
-            rootItems.blobArrays(),
-            rootItems.blobVectors(),
-            rootItems.varStrings(),
-            rootItems.checksums(),
-            rootItems.pads());
+        ParsedSchema parsedSchema =
+            new ParsedSchema(
+                schemaNamespace,
+                rootItems.messageTypes(),
+                rootItems.bitFields(),
+                rootItems.floats(),
+                rootItems.scaledInts(),
+                rootItems.arrays(),
+                rootItems.vectors(),
+                rootItems.blobArrays(),
+                rootItems.blobVectors(),
+                rootItems.varStrings(),
+                rootItems.checksums(),
+                rootItems.pads());
+        return new ParsedSpecDocument(parsedSchema, rootItems.imports());
       } finally {
         reader.close();
       }

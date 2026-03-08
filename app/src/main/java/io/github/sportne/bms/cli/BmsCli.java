@@ -9,6 +9,8 @@ import io.github.sportne.bms.util.Diagnostic;
 import io.github.sportne.bms.util.Diagnostics;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -90,16 +92,26 @@ public final class BmsCli {
    */
   private static int runValidate(String[] args, PrintStream out, PrintStream err)
       throws BmsException {
-    if (args.length != 2) {
-      err.println("Usage error: validate expects exactly one spec path.");
+    if (args.length < 2) {
+      err.println("Usage error: validate expects at least one spec path.");
       printUsage(err);
       return EXIT_USAGE_ERROR;
     }
 
-    Path specPath = Path.of(args[1]);
+    List<Path> specPaths = new ArrayList<>();
+    for (int index = 1; index < args.length; index++) {
+      String token = args[index];
+      if (token.startsWith("--")) {
+        err.println("Usage error: validate does not support options.");
+        printUsage(err);
+        return EXIT_USAGE_ERROR;
+      }
+      specPaths.add(Path.of(token));
+    }
+
     BmsCompiler compiler = new BmsCompiler(BmsCompiler.defaultXsdPath());
-    compiler.compile(specPath);
-    out.println("Validation succeeded: " + specPath);
+    compiler.compile(specPaths);
+    out.println("Validation succeeded: " + specPaths.get(0));
     return EXIT_SUCCESS;
   }
 
@@ -120,11 +132,22 @@ public final class BmsCli {
       return EXIT_USAGE_ERROR;
     }
 
-    Path specPath = Path.of(args[1]);
+    List<Path> specPaths = new ArrayList<>();
+    int index = 1;
+    while (index < args.length && !args[index].startsWith("--")) {
+      specPaths.add(Path.of(args[index]));
+      index++;
+    }
+    if (specPaths.isEmpty()) {
+      err.println("Usage error: generate expects at least one spec path before options.");
+      printUsage(err);
+      return EXIT_USAGE_ERROR;
+    }
+
     Path javaOutput = null;
     Path cppOutput = null;
 
-    for (int index = 2; index < args.length; index++) {
+    for (; index < args.length; index++) {
       String token = args[index];
       if ("--java".equals(token)) {
         if (index + 1 >= args.length) {
@@ -152,7 +175,7 @@ public final class BmsCli {
     }
 
     BmsCompiler compiler = new BmsCompiler(BmsCompiler.defaultXsdPath());
-    ResolvedSchema resolvedSchema = compiler.compile(specPath);
+    ResolvedSchema resolvedSchema = compiler.compile(specPaths);
 
     if (javaOutput != null) {
       new JavaCodeGenerator().generate(resolvedSchema, javaOutput);
@@ -185,7 +208,7 @@ public final class BmsCli {
    */
   private static void printUsage(PrintStream out) {
     out.println("Usage:");
-    out.println("  bms validate <spec.xml>");
-    out.println("  bms generate <spec.xml> --java <outDir> [--cpp <outDir>]");
+    out.println("  bms validate <spec.xml> [more-specs.xml ...]");
+    out.println("  bms generate <spec.xml> [more-specs.xml ...] --java <outDir> [--cpp <outDir>]");
   }
 }
