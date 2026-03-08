@@ -1,5 +1,6 @@
 package io.github.sportne.bms.semantic;
 
+import io.github.sportne.bms.model.IfLogicalOperator;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
 import io.github.sportne.bms.model.parsed.ParsedBitFlag;
@@ -42,11 +43,10 @@ import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
-import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
 import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
 import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
-import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfLogicalCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
@@ -1316,12 +1316,13 @@ public final class SemanticResolver {
       return new ResolvedIfComparison(
           parsed.fieldName(), primitiveType, parsed.operator(), parsed.literal());
     }
-    if (parsedCondition instanceof IfConditionExpressionParser.ParsedAndCondition parsedAnd) {
+    if (parsedCondition
+        instanceof IfConditionExpressionParser.ParsedLogicalCondition parsedLogical) {
       ResolvedIfCondition left =
           resolveIfConditionNode(
               messageName,
               conditionText,
-              parsedAnd.left(),
+              parsedLogical.left(),
               primitiveFieldByName,
               sourcePath,
               diagnostics);
@@ -1329,38 +1330,17 @@ public final class SemanticResolver {
           resolveIfConditionNode(
               messageName,
               conditionText,
-              parsedAnd.right(),
+              parsedLogical.right(),
               primitiveFieldByName,
               sourcePath,
               diagnostics);
       if (left == null || right == null) {
         return null;
       }
-      return new ResolvedIfAndCondition(left, right);
+      IfLogicalOperator operator = parsedLogical.operator();
+      return new ResolvedIfLogicalCondition(left, operator, right);
     }
-
-    IfConditionExpressionParser.ParsedOrCondition parsedOr =
-        (IfConditionExpressionParser.ParsedOrCondition) parsedCondition;
-    ResolvedIfCondition left =
-        resolveIfConditionNode(
-            messageName,
-            conditionText,
-            parsedOr.left(),
-            primitiveFieldByName,
-            sourcePath,
-            diagnostics);
-    ResolvedIfCondition right =
-        resolveIfConditionNode(
-            messageName,
-            conditionText,
-            parsedOr.right(),
-            primitiveFieldByName,
-            sourcePath,
-            diagnostics);
-    if (left == null || right == null) {
-      return null;
-    }
-    return new ResolvedIfOrCondition(left, right);
+    throw new IllegalStateException("Unsupported parsed if-condition node: " + parsedCondition);
   }
 
   /**

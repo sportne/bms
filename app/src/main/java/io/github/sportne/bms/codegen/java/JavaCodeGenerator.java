@@ -5,6 +5,7 @@ import io.github.sportne.bms.model.Endian;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
 import io.github.sportne.bms.model.IfComparisonOperator;
+import io.github.sportne.bms.model.IfLogicalOperator;
 import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.resolved.ArrayTypeRef;
 import io.github.sportne.bms.model.resolved.BlobArrayTypeRef;
@@ -24,11 +25,10 @@ import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
 import io.github.sportne.bms.model.resolved.ResolvedField;
 import io.github.sportne.bms.model.resolved.ResolvedFloat;
-import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
 import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
 import io.github.sportne.bms.model.resolved.ResolvedIfCondition;
-import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfLogicalCondition;
 import io.github.sportne.bms.model.resolved.ResolvedLengthMode;
 import io.github.sportne.bms.model.resolved.ResolvedMessageMember;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
@@ -4759,19 +4759,29 @@ public final class JavaCodeGenerator {
     if (condition instanceof ResolvedIfComparison comparison) {
       return comparisonExpression(comparison, ownerPrefix);
     }
-    if (condition instanceof ResolvedIfAndCondition andCondition) {
+    if (condition instanceof ResolvedIfLogicalCondition logicalCondition) {
       return "("
-          + ifConditionExpression(andCondition.left(), ownerPrefix)
-          + " && "
-          + ifConditionExpression(andCondition.right(), ownerPrefix)
+          + ifConditionExpression(logicalCondition.left(), ownerPrefix)
+          + " "
+          + logicalJavaOperator(logicalCondition.operator())
+          + " "
+          + ifConditionExpression(logicalCondition.right(), ownerPrefix)
           + ")";
     }
-    ResolvedIfOrCondition orCondition = (ResolvedIfOrCondition) condition;
-    return "("
-        + ifConditionExpression(orCondition.left(), ownerPrefix)
-        + " || "
-        + ifConditionExpression(orCondition.right(), ownerPrefix)
-        + ")";
+    throw new IllegalStateException("Unsupported if condition node: " + condition);
+  }
+
+  /**
+   * Converts one logical operator enum to its Java short-circuit symbol.
+   *
+   * @param operator logical operator in the resolved model
+   * @return Java operator symbol used in generated conditions
+   */
+  private static String logicalJavaOperator(IfLogicalOperator operator) {
+    return switch (operator) {
+      case AND, OR -> operator.javaSymbol();
+      default -> throw new IllegalStateException("Unsupported logical operator: " + operator);
+    };
   }
 
   /**

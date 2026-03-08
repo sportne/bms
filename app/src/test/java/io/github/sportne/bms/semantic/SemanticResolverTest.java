@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.sportne.bms.model.BitFieldSize;
 import io.github.sportne.bms.model.FloatEncoding;
 import io.github.sportne.bms.model.FloatSize;
+import io.github.sportne.bms.model.IfLogicalOperator;
 import io.github.sportne.bms.model.StringEncoding;
 import io.github.sportne.bms.model.parsed.ParsedArray;
 import io.github.sportne.bms.model.parsed.ParsedBitField;
@@ -36,10 +37,9 @@ import io.github.sportne.bms.model.resolved.BlobVectorTypeRef;
 import io.github.sportne.bms.model.resolved.FloatTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedChecksum;
 import io.github.sportne.bms.model.resolved.ResolvedCountFieldLength;
-import io.github.sportne.bms.model.resolved.ResolvedIfAndCondition;
 import io.github.sportne.bms.model.resolved.ResolvedIfBlock;
 import io.github.sportne.bms.model.resolved.ResolvedIfComparison;
-import io.github.sportne.bms.model.resolved.ResolvedIfOrCondition;
+import io.github.sportne.bms.model.resolved.ResolvedIfLogicalCondition;
 import io.github.sportne.bms.model.resolved.ResolvedMessageType;
 import io.github.sportne.bms.model.resolved.ResolvedPad;
 import io.github.sportne.bms.model.resolved.ResolvedVarString;
@@ -817,11 +817,13 @@ class SemanticResolverTest {
     ResolvedMessageType messageType = resolved.messageTypes().get(0);
     ResolvedIfBlock ifBlock = (ResolvedIfBlock) messageType.members().get(3);
 
-    assertInstanceOf(ResolvedIfOrCondition.class, ifBlock.condition());
-    ResolvedIfOrCondition root = (ResolvedIfOrCondition) ifBlock.condition();
+    assertInstanceOf(ResolvedIfLogicalCondition.class, ifBlock.condition());
+    ResolvedIfLogicalCondition root = (ResolvedIfLogicalCondition) ifBlock.condition();
+    assertEquals(IfLogicalOperator.OR, root.operator());
     assertInstanceOf(ResolvedIfComparison.class, root.left());
     assertEquals("a", ((ResolvedIfComparison) root.left()).fieldName());
-    assertInstanceOf(ResolvedIfAndCondition.class, root.right());
+    assertInstanceOf(ResolvedIfLogicalCondition.class, root.right());
+    assertEquals(IfLogicalOperator.AND, ((ResolvedIfLogicalCondition) root.right()).operator());
   }
 
   /** Contract: parentheses in text conditions override default `and`/`or` precedence. */
@@ -848,9 +850,11 @@ class SemanticResolverTest {
     ResolvedMessageType messageType = resolved.messageTypes().get(0);
     ResolvedIfBlock ifBlock = (ResolvedIfBlock) messageType.members().get(3);
 
-    assertInstanceOf(ResolvedIfAndCondition.class, ifBlock.condition());
-    ResolvedIfAndCondition root = (ResolvedIfAndCondition) ifBlock.condition();
-    assertInstanceOf(ResolvedIfOrCondition.class, root.left());
+    assertInstanceOf(ResolvedIfLogicalCondition.class, ifBlock.condition());
+    ResolvedIfLogicalCondition root = (ResolvedIfLogicalCondition) ifBlock.condition();
+    assertEquals(IfLogicalOperator.AND, root.operator());
+    assertInstanceOf(ResolvedIfLogicalCondition.class, root.left());
+    assertEquals(IfLogicalOperator.OR, ((ResolvedIfLogicalCondition) root.left()).operator());
     assertInstanceOf(ResolvedIfComparison.class, root.right());
     assertEquals("c", ((ResolvedIfComparison) root.right()).fieldName());
   }

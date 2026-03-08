@@ -14,8 +14,9 @@
     <if field="version" operator="gte" value="1">
       <field name="gteMode" type="uint8" comment="Field emitted for greater-than-or-equal"/>
     </if>
-    <if test="version &gt;= 2 and version &lt;= 10">
-      <field name="betweenMode" type="uint8" comment="Field emitted for text-and condition"/>
+    <if field="version" operator="gte" value="2"
+        logicalOperator="and" field2="version" operator2="lte" value2="10">
+      <field name="betweenMode" type="uint8" comment="Field emitted for structured-and condition"/>
     </if>
     <if test="(version == 2 or version == 3) and version &lt; 5">
       <field name="compoundMode" type="uint8" comment="Field emitted for parenthesized text condition"/>

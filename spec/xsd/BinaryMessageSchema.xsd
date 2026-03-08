@@ -79,6 +79,13 @@
     </xs:restriction>
   </xs:simpleType>
 
+  <xs:simpleType name="ifLogicalOperatorType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="and"/>
+      <xs:enumeration value="or"/>
+    </xs:restriction>
+  </xs:simpleType>
+
   <xs:simpleType name="scaledIntBaseType">
     <xs:restriction base="xs:string">
       <xs:enumeration value="int8"/>
@@ -309,6 +316,10 @@
     <xs:attribute name="field" type="xs:string" use="optional"/>
     <xs:attribute name="operator" type="ifComparisonOperatorType" use="optional"/>
     <xs:attribute name="value" type="xs:string" use="optional"/>
+    <xs:attribute name="logicalOperator" type="ifLogicalOperatorType" use="optional"/>
+    <xs:attribute name="field2" type="xs:string" use="optional"/>
+    <xs:attribute name="operator2" type="ifComparisonOperatorType" use="optional"/>
+    <xs:attribute name="value2" type="xs:string" use="optional"/>
   </xs:complexType>
 
   <!-- =================================================== -->

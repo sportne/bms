@@ -80,6 +80,7 @@ Current Java backend conditional notes:
 - checksum `range` must be `start..end` with non-negative integer indexes and `start <= end`
 - `if` conditions can be written in two forms:
   - preferred structured form: `field`, `operator`, `value` (with enum operators `eq`, `ne`, `lt`, `lte`, `gt`, `gte`)
+  - structured compound form: add `logicalOperator` (`and` or `or`) plus `field2`, `operator2`, `value2`
   - legacy text form: `test="field OP literal"`
 - both forms currently support `==`, `!=`, `<`, `<=`, `>`, and `>=` with numeric literals
 - text `if@test` supports compound boolean expressions using `and` and `or`

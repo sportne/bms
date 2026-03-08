@@ -217,6 +217,22 @@ class SpecParserTest {
             .anyMatch(diagnostic -> diagnostic.code().equals("PARSER_INVALID_ATTRIBUTE")));
   }
 
+  /**
+   * Contract: structured compound if attributes use enum logicalOperator values and are normalized
+   * to canonical text for semantic parsing.
+   */
+  @Test
+  void parserNormalizesStructuredCompoundIfCondition() throws Exception {
+    SpecParser parser = new SpecParser();
+    Path specPath = TestSupport.resourcePath("specs/conditional-if-relational-valid.xml");
+
+    ParsedSchema parsedSchema = parser.parse(specPath);
+    ParsedMessageType messageType = parsedSchema.messageTypes().get(0);
+    ParsedIfBlock ifBlock = (ParsedIfBlock) messageType.members().get(5);
+
+    assertEquals("version >= 2 and version <= 10", ifBlock.test());
+  }
+
   /** Contract: structured if comparisons must include `field`, `operator`, and `value`. */
   @Test
   void parserRejectsMissingStructuredIfComparisonAttributes() {

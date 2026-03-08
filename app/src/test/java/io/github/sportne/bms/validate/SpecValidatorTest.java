@@ -93,6 +93,20 @@ class SpecValidatorTest {
             .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
   }
 
+  /** Contract: logicalOperator in structured `if` comparisons must use enum values from XSD. */
+  @Test
+  void invalidIfLogicalOperatorFailsXsdValidation() throws Exception {
+    SpecValidator validator = SpecValidator.fromXsd(TestSupport.repositoryXsdPath());
+    Path specPath = TestSupport.resourcePath("specs/if-invalid-logical-operator.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> validator.validateOrThrow(specPath));
+
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().startsWith("XSD")));
+  }
+
   /** Contract: missing input files produce an IO diagnostic instead of crashing. */
   @Test
   void validatorReportsIoErrorForMissingSpecPath() throws Exception {
