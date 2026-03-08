@@ -22,6 +22,14 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Install C++ compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++
+
+      - name: Verify C++ compiler
+        run: g++ --version
+
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
