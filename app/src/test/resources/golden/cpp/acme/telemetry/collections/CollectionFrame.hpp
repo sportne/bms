@@ -5,15 +5,23 @@
 #include <cstdint>
 #include <span>
 #include <vector>
-#include "acme/telemetry/Header.hpp"
 
 namespace acme {
 namespace telemetry {
-namespace packet {
+namespace collections {
 
-struct Packet {
-  ::acme::telemetry::Header header{};
-  std::uint32_t payloadLength{};
+struct CollectionFrame {
+  std::uint16_t count{};
+  std::uint8_t blobCount{};
+  std::array<std::uint8_t, 4> samples{};
+  std::vector<std::uint8_t> events{};
+  std::array<std::uint8_t, 8> hash{};
+  std::vector<std::uint8_t> payload{};
+  std::vector<std::uint8_t> pathData{};
+  std::array<std::uint8_t, 2> reusableArrayField{};
+  std::vector<std::uint8_t> reusableVectorField{};
+  std::array<std::uint8_t, 16> reusableBlobArrayField{};
+  std::vector<std::uint8_t> reusableBlobVectorField{};
 
   /**
    * Encodes this message instance into wire bytes.
@@ -28,7 +36,7 @@ struct Packet {
    * @param data encoded message bytes
    * @return decoded message value
    */
-  static Packet decode(std::span<const std::uint8_t> data);
+  static CollectionFrame decode(std::span<const std::uint8_t> data);
 
   /**
    * Decodes one message from the current cursor position.
@@ -37,9 +45,9 @@ struct Packet {
    * @param cursor current decode cursor; advanced past this message
    * @return decoded message value
    */
-  static Packet decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
+  static CollectionFrame decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
 };
 
-}  // namespace packet
+}  // namespace collections
 }  // namespace telemetry
 }  // namespace acme

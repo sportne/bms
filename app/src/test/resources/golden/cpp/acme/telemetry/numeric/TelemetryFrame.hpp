@@ -5,15 +5,25 @@
 #include <cstdint>
 #include <span>
 #include <vector>
-#include "acme/telemetry/Header.hpp"
 
 namespace acme {
 namespace telemetry {
-namespace packet {
+namespace numeric {
 
-struct Packet {
-  ::acme::telemetry::Header header{};
-  std::uint32_t payloadLength{};
+struct TelemetryFrame {
+  std::uint8_t version{};
+  std::uint8_t statusBits{};
+  double temperature{};
+  double voltage{};
+  double reusableTemperature{};
+  double reusableFloat{};
+
+  bool getStatusBitsAlarm() const;
+  void setStatusBitsAlarm(bool value);
+  std::uint64_t getStatusBitsState() const;
+  void setStatusBitsState(std::uint64_t value);
+  static constexpr std::uint64_t STATUSBITS_STATE_OFF = 0ULL;
+  static constexpr std::uint64_t STATUSBITS_STATE_ON = 1ULL;
 
   /**
    * Encodes this message instance into wire bytes.
@@ -28,7 +38,7 @@ struct Packet {
    * @param data encoded message bytes
    * @return decoded message value
    */
-  static Packet decode(std::span<const std::uint8_t> data);
+  static TelemetryFrame decode(std::span<const std::uint8_t> data);
 
   /**
    * Decodes one message from the current cursor position.
@@ -37,9 +47,9 @@ struct Packet {
    * @param cursor current decode cursor; advanced past this message
    * @return decoded message value
    */
-  static Packet decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
+  static TelemetryFrame decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor);
 };
 
-}  // namespace packet
+}  // namespace numeric
 }  // namespace telemetry
 }  // namespace acme

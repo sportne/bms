@@ -1,4 +1,4 @@
-#include "acme/telemetry/Header.hpp"
+#include "acme/telemetry/numeric/TelemetryFrame.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,6 +10,7 @@
 
 namespace acme {
 namespace telemetry {
+namespace numeric {
 
 namespace {
 
@@ -206,29 +207,64 @@ std::size_t requireCount(T value, const char* fieldName) {
 
 }  // namespace
 
-std::vector<std::uint8_t> Header::encode() const {
+bool TelemetryFrame::getStatusBitsAlarm() const {
+  return (static_cast<std::uint64_t>(statusBits) & 1ULL) != 0ULL;
+}
+
+void TelemetryFrame::setStatusBitsAlarm(bool value) {
+  std::uint64_t raw = static_cast<std::uint64_t>(statusBits);
+  if (value) {
+    raw |= 1ULL;
+  } else {
+    raw &= ~1ULL;
+  }
+  statusBits = static_cast<std::uint8_t>(raw);
+}
+
+std::uint64_t TelemetryFrame::getStatusBitsState() const {
+  return (static_cast<std::uint64_t>(statusBits) >> 1) & 3ULL;
+}
+
+void TelemetryFrame::setStatusBitsState(std::uint64_t value) {
+  if (value > 3ULL) {
+    throw std::invalid_argument("statusBits.state is out of range for its bit segment.");
+  }
+  std::uint64_t raw = static_cast<std::uint64_t>(statusBits);
+  raw = (raw & ~6ULL) | ((value & 3ULL) << 1);
+  statusBits = static_cast<std::uint8_t>(raw);
+}
+
+std::vector<std::uint8_t> TelemetryFrame::encode() const {
   std::vector<std::uint8_t> out;
   writeIntegral<std::uint8_t>(out, this->version, false);
-  writeIntegral<std::uint16_t>(out, this->sequence, true);
-  (void)"sequence";
+  writeIntegral<std::uint8_t>(out, this->statusBits, false);
+  writeIntegral<std::int32_t>(out, scaleToSignedRaw<std::int32_t>(this->temperature, 0.1, "temperature"), true);
+  writeIntegral<std::uint16_t>(out, scaleToUnsignedRaw<std::uint16_t>(this->voltage, 0.01, "voltage"), false);
+  writeIntegral<std::int16_t>(out, scaleToSignedRaw<std::int16_t>(this->reusableTemperature, 0.01, "reusableTemperature"), false);
+  writeFloat32(out, static_cast<float>(this->reusableFloat), false);
   return out;
 }
 
-Header Header::decode(std::span<const std::uint8_t> data) {
+TelemetryFrame TelemetryFrame::decode(std::span<const std::uint8_t> data) {
   std::size_t cursor = 0;
-  Header value = Header::decodeFrom(data, cursor);
+  TelemetryFrame value = TelemetryFrame::decodeFrom(data, cursor);
   if (cursor != data.size()) {
-    throw std::invalid_argument("Extra bytes remain after decoding Header.");
+    throw std::invalid_argument("Extra bytes remain after decoding TelemetryFrame.");
   }
   return value;
 }
 
-Header Header::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
-  Header value{};
+TelemetryFrame TelemetryFrame::decodeFrom(std::span<const std::uint8_t> data, std::size_t& cursor) {
+  TelemetryFrame value{};
   value.version = readIntegral<std::uint8_t>(data, cursor, false, "version");
-  value.sequence = readIntegral<std::uint16_t>(data, cursor, true, "sequence");
+  value.statusBits = readIntegral<std::uint8_t>(data, cursor, false, "statusBits");
+  value.temperature = static_cast<double>(readIntegral<std::int32_t>(data, cursor, true, "temperature")) * 0.1;
+  value.voltage = static_cast<double>(readIntegral<std::uint16_t>(data, cursor, false, "voltage")) * 0.01;
+  value.reusableTemperature = static_cast<double>(readIntegral<std::int16_t>(data, cursor, false, "reusableTemperature")) * 0.01;
+  value.reusableFloat = static_cast<double>(readFloat32(data, cursor, false, "reusableFloat"));
   return value;
 }
 
+}  // namespace numeric
 }  // namespace telemetry
 }  // namespace acme

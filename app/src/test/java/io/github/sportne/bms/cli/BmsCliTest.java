@@ -212,6 +212,32 @@ class BmsCliTest {
     assertTrue(Files.exists(javaOutputDir.resolve("acme/telemetry/numeric/TelemetryFrame.java")));
   }
 
+  /** Contract: C++ generation succeeds for the numeric backend slice. */
+  @Test
+  void generateCommandReturnsSuccessForNumericSliceSpecInCpp() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path cppOutputDir = tempDir.resolve("cpp-numeric");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/numeric-slice-valid.xml").toString(),
+              "--cpp",
+              cppOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(Files.exists(cppOutputDir.resolve("acme/telemetry/numeric/TelemetryFrame.hpp")));
+    assertTrue(Files.exists(cppOutputDir.resolve("acme/telemetry/numeric/TelemetryFrame.cpp")));
+  }
+
   @Test
   /** Contract: Java generation succeeds for the collection backend slice. */
   void generateCommandReturnsSuccessForCollectionSliceSpec() {
@@ -236,6 +262,34 @@ class BmsCliTest {
     assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
     assertTrue(
         Files.exists(javaOutputDir.resolve("acme/telemetry/collections/CollectionFrame.java")));
+  }
+
+  /** Contract: C++ generation succeeds for the collection backend slice. */
+  @Test
+  void generateCommandReturnsSuccessForCollectionSliceSpecInCpp() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path cppOutputDir = tempDir.resolve("cpp-collections");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/collections-slice-valid.xml").toString(),
+              "--cpp",
+              cppOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(cppOutputDir.resolve("acme/telemetry/collections/CollectionFrame.hpp")));
+    assertTrue(
+        Files.exists(cppOutputDir.resolve("acme/telemetry/collections/CollectionFrame.cpp")));
   }
 
   @Test
