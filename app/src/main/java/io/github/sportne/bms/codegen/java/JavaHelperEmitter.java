@@ -340,18 +340,22 @@ final class JavaHelperEmitter {
           .append("  public void set")
           .append(bitFieldPascalName)
           .append(segmentPascalName)
-          .append("(long value) {\n")
-          .append("    if (value < 0L || value > ")
-          .append(mask)
-          .append("L) {\n")
-          .append("      throw new IllegalArgumentException(\"Segment ")
-          .append(resolvedBitSegment.name())
-          .append(" in bitField ")
-          .append(resolvedBitField.name())
-          .append(" must be in [0, ")
-          .append(mask)
-          .append("]\");\n")
-          .append("    }\n")
+          .append("(long value) {\n");
+      if (width < 64) {
+        builder
+            .append("    if (value < 0L || value > ")
+            .append(mask)
+            .append("L) {\n")
+            .append("      throw new IllegalArgumentException(\"Segment ")
+            .append(resolvedBitSegment.name())
+            .append(" in bitField ")
+            .append(resolvedBitField.name())
+            .append(" must be in [0, ")
+            .append(mask)
+            .append("]\");\n")
+            .append("    }\n");
+      }
+      builder
           .append("    long raw = get")
           .append(bitFieldPascalName)
           .append("Raw();\n")

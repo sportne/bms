@@ -397,6 +397,7 @@ public final class JavaCodeGenerator {
       }
       """
           .indent(2)
+          .replace("private static ", "static ")
           .replace("  \n", "\n");
 
   private static final String CHECKSUM_IO_HELPERS =
@@ -612,6 +613,7 @@ public final class JavaCodeGenerator {
       }
       """
           .indent(2)
+          .replace("private static ", "static ")
           .replace("  \n", "\n");
 
   /**

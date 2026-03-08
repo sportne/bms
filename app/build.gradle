@@ -96,6 +96,93 @@ spotbugs {
 	ignoreFailures = false
 }
 
+def generatedJavaSpotbugsFixtureSpecs = [
+	'src/test/resources/specs/valid-foundation.xml',
+	'src/test/resources/specs/numeric-slice-valid.xml',
+	'src/test/resources/specs/collections-slice-valid.xml',
+	'src/test/resources/specs/varstring-pad-slice-valid.xml',
+	'src/test/resources/specs/conditional-backend-valid.xml',
+	'src/test/resources/specs/conditional-if-relational-valid.xml',
+	'src/test/resources/specs/checksum-crc16-valid.xml',
+	'src/test/resources/specs/checksum-crc32-valid.xml',
+	'src/test/resources/specs/checksum-crc64-valid.xml',
+	'src/test/resources/specs/checksum-sha256-valid.xml',
+	'src/test/resources/specs/java-e2e-all-supported-valid.xml',
+	'src/test/resources/specs/java-generator-coverage-valid.xml'
+]
+def generatedJavaSpotbugsSourcesDir = layout.buildDirectory.dir('generated/spotbugs/java-sources')
+def generatedJavaSpotbugsClassesDir = layout.buildDirectory.dir('generated/spotbugs/java-classes')
+
+def cleanGeneratedJavaSourcesForSpotbugs =
+		tasks.register('cleanGeneratedJavaSourcesForSpotbugs', Delete) {
+			delete(generatedJavaSpotbugsSourcesDir)
+		}
+def generateJavaSpotbugsFixtureTasks = []
+generatedJavaSpotbugsFixtureSpecs.eachWithIndex { String fixturePath, int fixtureIndex ->
+	String fixtureStem = fixturePath.tokenize('/').last().replace('.xml', '').replace('-', '_')
+	String fixtureTaskName =
+			"generateJavaSourcesForSpotbugs${fixtureStem.substring(0, 1).toUpperCase()}${fixtureStem.substring(1)}"
+	def fixtureTask = tasks.register(fixtureTaskName, JavaExec) {
+		description = "Generates Java code for ${fixturePath}."
+		group = 'verification'
+		dependsOn classes
+		dependsOn cleanGeneratedJavaSourcesForSpotbugs
+		mainClass = application.mainClass.get()
+		classpath = sourceSets.main.runtimeClasspath
+		args(
+				'generate',
+				layout.projectDirectory.file(fixturePath).asFile.absolutePath,
+				'--java',
+				generatedJavaSpotbugsSourcesDir.get().asFile.absolutePath
+				)
+		inputs.file(layout.projectDirectory.file(fixturePath))
+		outputs.dir(generatedJavaSpotbugsSourcesDir)
+	}
+	if (fixtureIndex > 0) {
+		fixtureTask.configure {
+			mustRunAfter(generateJavaSpotbugsFixtureTasks[fixtureIndex - 1])
+		}
+	}
+	generateJavaSpotbugsFixtureTasks.add(fixtureTask)
+}
+
+tasks.register('generateJavaSourcesForSpotbugs') {
+	description = 'Generates Java code from conformance fixtures for strict SpotBugs analysis.'
+	group = 'verification'
+	dependsOn generateJavaSpotbugsFixtureTasks
+	inputs.files(generatedJavaSpotbugsFixtureSpecs.collect { layout.projectDirectory.file(it) })
+	outputs.dir(generatedJavaSpotbugsSourcesDir)
+}
+
+tasks.register('compileGeneratedJavaForSpotbugs', JavaCompile) {
+	description = 'Compiles generated Java sources used by strict SpotBugs analysis.'
+	group = 'verification'
+	dependsOn tasks.named('generateJavaSourcesForSpotbugs')
+	source = fileTree(generatedJavaSpotbugsSourcesDir) {
+		include '**/*.java'
+	}
+	classpath = files()
+	destinationDirectory = generatedJavaSpotbugsClassesDir
+	options.release = 21
+	options.encoding = 'UTF-8'
+}
+
+tasks.register('spotbugsGeneratedJava', com.github.spotbugs.snom.SpotBugsTask) {
+	description = 'Runs strict SpotBugs analysis on generated Java classes.'
+	group = 'verification'
+	dependsOn tasks.named('compileGeneratedJavaForSpotbugs')
+	classes = files(tasks.named('compileGeneratedJavaForSpotbugs').map { it.destinationDirectory })
+	sourceDirs = files(generatedJavaSpotbugsSourcesDir)
+	auxClassPaths = files()
+	effort = com.github.spotbugs.snom.Effort.MAX
+	reportLevel = com.github.spotbugs.snom.Confidence.valueOf('LOW')
+	ignoreFailures = false
+	reports {
+		html.required = true
+		xml.required = false
+	}
+}
+
 checkstyle {
 	toolVersion = '10.17.0'
 	configFile = rootProject.file('config/checkstyle/checkstyle.xml')
@@ -121,6 +208,7 @@ check {
 	dependsOn jacocoTestCoverageVerification
 	dependsOn spotbugsMain
 	dependsOn spotbugsTest
+	dependsOn spotbugsGeneratedJava
 	dependsOn checkstyleMain
 	dependsOn checkstyleTest
 }

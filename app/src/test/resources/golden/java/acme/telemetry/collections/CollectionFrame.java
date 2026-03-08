@@ -15,17 +15,106 @@ import java.util.ArrayList;
 import java.util.Objects;
 
 public final class CollectionFrame {
-  public int count;
-  public short blobCount;
-  public short[] samples;
-  public short[] events;
-  public byte[] hash;
-  public byte[] payload;
-  public short[] pathData;
-  public short[] reusableArrayField;
-  public short[] reusableVectorField;
-  public byte[] reusableBlobArrayField;
-  public byte[] reusableBlobVectorField;
+  private int count;
+  private short blobCount;
+  private short[] samples = new short[0];
+  private short[] events = new short[0];
+  private byte[] hash = new byte[0];
+  private byte[] payload = new byte[0];
+  private short[] pathData = new short[0];
+  private short[] reusableArrayField = new short[0];
+  private short[] reusableVectorField = new short[0];
+  private byte[] reusableBlobArrayField = new byte[0];
+  private byte[] reusableBlobVectorField = new byte[0];
+
+  public int getCount() {
+    return this.count;
+  }
+
+  public void setCount(int value) {
+    this.count = value;
+  }
+
+  public short getBlobCount() {
+    return this.blobCount;
+  }
+
+  public void setBlobCount(short value) {
+    this.blobCount = value;
+  }
+
+  public short[] getSamples() {
+    return this.samples.clone();
+  }
+
+  public void setSamples(short[] value) {
+    this.samples = Objects.requireNonNull(value, "samples").clone();
+  }
+
+  public short[] getEvents() {
+    return this.events.clone();
+  }
+
+  public void setEvents(short[] value) {
+    this.events = Objects.requireNonNull(value, "events").clone();
+  }
+
+  public byte[] getHash() {
+    return this.hash.clone();
+  }
+
+  public void setHash(byte[] value) {
+    this.hash = Objects.requireNonNull(value, "hash").clone();
+  }
+
+  public byte[] getPayload() {
+    return this.payload.clone();
+  }
+
+  public void setPayload(byte[] value) {
+    this.payload = Objects.requireNonNull(value, "payload").clone();
+  }
+
+  public short[] getPathData() {
+    return this.pathData.clone();
+  }
+
+  public void setPathData(short[] value) {
+    this.pathData = Objects.requireNonNull(value, "pathData").clone();
+  }
+
+  public short[] getReusableArrayField() {
+    return this.reusableArrayField.clone();
+  }
+
+  public void setReusableArrayField(short[] value) {
+    this.reusableArrayField = Objects.requireNonNull(value, "reusableArrayField").clone();
+  }
+
+  public short[] getReusableVectorField() {
+    return this.reusableVectorField.clone();
+  }
+
+  public void setReusableVectorField(short[] value) {
+    this.reusableVectorField = Objects.requireNonNull(value, "reusableVectorField").clone();
+  }
+
+  public byte[] getReusableBlobArrayField() {
+    return this.reusableBlobArrayField.clone();
+  }
+
+  public void setReusableBlobArrayField(byte[] value) {
+    this.reusableBlobArrayField = Objects.requireNonNull(value, "reusableBlobArrayField").clone();
+  }
+
+  public byte[] getReusableBlobVectorField() {
+    return this.reusableBlobVectorField.clone();
+  }
+
+  public void setReusableBlobVectorField(byte[] value) {
+    this.reusableBlobVectorField = Objects.requireNonNull(value, "reusableBlobVectorField").clone();
+  }
+
 
   public byte[] encode() {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -174,7 +263,7 @@ public final class CollectionFrame {
    * @param out destination byte stream
    * @param value value to write
    */
-  private static void writeInt8(ByteArrayOutputStream out, byte value) {
+  static void writeInt8(ByteArrayOutputStream out, byte value) {
     out.write(value);
   }
 
@@ -184,7 +273,7 @@ public final class CollectionFrame {
    * @param out destination byte stream
    * @param value value to write
    */
-  private static void writeUInt8(ByteArrayOutputStream out, short value) {
+  static void writeUInt8(ByteArrayOutputStream out, short value) {
     out.write(value & 0xFF);
   }
 
@@ -195,7 +284,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeInt16(ByteArrayOutputStream out, short value, ByteOrder order) {
+  static void writeInt16(ByteArrayOutputStream out, short value, ByteOrder order) {
     ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES).order(order);
     buffer.putShort(value);
     out.write(buffer.array(), 0, Short.BYTES);
@@ -208,7 +297,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeUInt16(ByteArrayOutputStream out, int value, ByteOrder order) {
+  static void writeUInt16(ByteArrayOutputStream out, int value, ByteOrder order) {
     writeInt16(out, (short) (value & 0xFFFF), order);
   }
 
@@ -219,7 +308,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeInt32(ByteArrayOutputStream out, int value, ByteOrder order) {
+  static void writeInt32(ByteArrayOutputStream out, int value, ByteOrder order) {
     ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES).order(order);
     buffer.putInt(value);
     out.write(buffer.array(), 0, Integer.BYTES);
@@ -232,7 +321,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeUInt32(ByteArrayOutputStream out, long value, ByteOrder order) {
+  static void writeUInt32(ByteArrayOutputStream out, long value, ByteOrder order) {
     writeInt32(out, (int) (value & 0xFFFFFFFFL), order);
   }
 
@@ -243,7 +332,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
+  static void writeInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
     ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES).order(order);
     buffer.putLong(value);
     out.write(buffer.array(), 0, Long.BYTES);
@@ -256,7 +345,7 @@ public final class CollectionFrame {
    * @param value value to write
    * @param order byte order to use
    */
-  private static void writeUInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
+  static void writeUInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
     writeInt64(out, value, order);
   }
 
@@ -266,7 +355,7 @@ public final class CollectionFrame {
    * @param input source byte buffer
    * @return decoded value
    */
-  private static byte readInt8(ByteBuffer input) {
+  static byte readInt8(ByteBuffer input) {
     return input.get();
   }
 
@@ -276,7 +365,7 @@ public final class CollectionFrame {
    * @param input source byte buffer
    * @return decoded value
    */
-  private static short readUInt8(ByteBuffer input) {
+  static short readUInt8(ByteBuffer input) {
     return (short) (input.get() & 0xFF);
   }
 
@@ -287,7 +376,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static short readInt16(ByteBuffer input, ByteOrder order) {
+  static short readInt16(ByteBuffer input, ByteOrder order) {
     ByteBuffer slice = input.slice().order(order);
     short value = slice.getShort();
     input.position(input.position() + Short.BYTES);
@@ -301,7 +390,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static int readUInt16(ByteBuffer input, ByteOrder order) {
+  static int readUInt16(ByteBuffer input, ByteOrder order) {
     return Short.toUnsignedInt(readInt16(input, order));
   }
 
@@ -312,7 +401,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static int readInt32(ByteBuffer input, ByteOrder order) {
+  static int readInt32(ByteBuffer input, ByteOrder order) {
     ByteBuffer slice = input.slice().order(order);
     int value = slice.getInt();
     input.position(input.position() + Integer.BYTES);
@@ -326,7 +415,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static long readUInt32(ByteBuffer input, ByteOrder order) {
+  static long readUInt32(ByteBuffer input, ByteOrder order) {
     return Integer.toUnsignedLong(readInt32(input, order));
   }
 
@@ -337,7 +426,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static long readInt64(ByteBuffer input, ByteOrder order) {
+  static long readInt64(ByteBuffer input, ByteOrder order) {
     ByteBuffer slice = input.slice().order(order);
     long value = slice.getLong();
     input.position(input.position() + Long.BYTES);
@@ -351,7 +440,7 @@ public final class CollectionFrame {
    * @param order byte order to use
    * @return decoded value
    */
-  private static long readUInt64(ByteBuffer input, ByteOrder order) {
+  static long readUInt64(ByteBuffer input, ByteOrder order) {
     return readInt64(input, order);
   }
 
@@ -362,7 +451,7 @@ public final class CollectionFrame {
    * @param fieldName field name shown in exception text
    * @return validated count value as int
    */
-  private static int requireCount(long countValue, String fieldName) {
+  static int requireCount(long countValue, String fieldName) {
     if (countValue < 0 || countValue > Integer.MAX_VALUE) {
       throw new IllegalArgumentException(
           "Count field " + fieldName + " must be between 0 and Integer.MAX_VALUE.");
@@ -377,7 +466,7 @@ public final class CollectionFrame {
    * @param fieldName field name shown in exception text
    * @return validated count value as int
    */
-  private static int requireCountUnsignedLong(long countValue, String fieldName) {
+  static int requireCountUnsignedLong(long countValue, String fieldName) {
     if (Long.compareUnsigned(countValue, Integer.toUnsignedLong(Integer.MAX_VALUE)) > 0) {
       throw new IllegalArgumentException(
           "Unsigned count field "
@@ -399,7 +488,7 @@ public final class CollectionFrame {
    * @param fieldName field/member name for exception text
    * @return rounded raw integer value
    */
-  private static long scaleToSignedRaw(
+  static long scaleToSignedRaw(
       double logicalValue,
       double scale,
       long minInclusive,
@@ -439,7 +528,7 @@ public final class CollectionFrame {
    * @param fieldName field/member name for exception text
    * @return rounded raw integer value
    */
-  private static long scaleToUnsignedRaw(
+  static long scaleToUnsignedRaw(
       double logicalValue, double scale, long maxInclusive, String fieldName) {
     if (!Double.isFinite(logicalValue)) {
       throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
@@ -475,7 +564,7 @@ public final class CollectionFrame {
    * @param fieldName field/member name for exception text
    * @return rounded raw unsigned-64 value encoded in one long
    */
-  private static long scaleToUnsignedRaw64(double logicalValue, double scale, String fieldName) {
+  static long scaleToUnsignedRaw64(double logicalValue, double scale, String fieldName) {
     if (!Double.isFinite(logicalValue)) {
       throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
     }
@@ -516,7 +605,7 @@ public final class CollectionFrame {
    * @param value raw unsigned-64 value bits
    * @return floating-point value in the unsigned-64 numeric range
    */
-  private static double unsignedLongToDouble(long value) {
+  static double unsignedLongToDouble(long value) {
     if (value >= 0L) {
       return (double) value;
     }

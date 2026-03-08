@@ -11,7 +11,7 @@ import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.testutil.TestSupport;
 import java.io.IOException;
 import java.lang.reflect.Array;
-import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
@@ -334,29 +334,28 @@ final class ConformanceRuntimeSupport {
   }
 
   /**
-   * Sets one public field value through reflection.
+   * Sets one generated-property value through reflection.
    *
    * @param target target object
-   * @param fieldName field name
-   * @param value field value
+   * @param fieldName property name
+   * @param value property value
    * @throws Exception when reflection access fails
    */
   static void setFieldValue(Object target, String fieldName, Object value) throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    field.set(target, value);
+    Method getter = resolveGetter(target.getClass(), fieldName);
+    invokeSetter(target, fieldName, getter.getReturnType(), value);
   }
 
   /**
-   * Reads one public field value through reflection.
+   * Reads one generated-property value through reflection.
    *
    * @param target target object
-   * @param fieldName field name
-   * @return field value
+   * @param fieldName property name
+   * @return property value
    * @throws Exception when reflection access fails
    */
   static Object getFieldValue(Object target, String fieldName) throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    return field.get(target);
+    return invokeGetter(target, fieldName);
   }
 
   /**
@@ -368,22 +367,21 @@ final class ConformanceRuntimeSupport {
    * @throws Exception when reflection access fails
    */
   static void setNumericField(Object target, String fieldName, long value) throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    Class<?> type = field.getType();
+    Class<?> type = resolveGetter(target.getClass(), fieldName).getReturnType();
     if (type == byte.class) {
-      field.setByte(target, (byte) value);
+      invokeSetter(target, fieldName, type, (byte) value);
       return;
     }
     if (type == short.class) {
-      field.setShort(target, (short) value);
+      invokeSetter(target, fieldName, type, (short) value);
       return;
     }
     if (type == int.class) {
-      field.setInt(target, (int) value);
+      invokeSetter(target, fieldName, type, (int) value);
       return;
     }
     if (type == long.class) {
-      field.setLong(target, value);
+      invokeSetter(target, fieldName, type, value);
       return;
     }
     throw new IllegalArgumentException(
@@ -399,14 +397,13 @@ final class ConformanceRuntimeSupport {
    * @throws Exception when reflection access fails
    */
   static void setFloatingField(Object target, String fieldName, double value) throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    Class<?> type = field.getType();
+    Class<?> type = resolveGetter(target.getClass(), fieldName).getReturnType();
     if (type == float.class) {
-      field.setFloat(target, (float) value);
+      invokeSetter(target, fieldName, type, (float) value);
       return;
     }
     if (type == double.class) {
-      field.setDouble(target, value);
+      invokeSetter(target, fieldName, type, value);
       return;
     }
     throw new IllegalArgumentException(
@@ -423,13 +420,13 @@ final class ConformanceRuntimeSupport {
    */
   static void setNumericArrayField(Object target, String fieldName, long[] values)
       throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    Class<?> componentType = field.getType().getComponentType();
+    Class<?> fieldType = resolveGetter(target.getClass(), fieldName).getReturnType();
+    Class<?> componentType = fieldType.getComponentType();
     Object array = Array.newInstance(componentType, values.length);
     for (int index = 0; index < values.length; index++) {
       setNumericArrayValue(array, componentType, index, values[index]);
     }
-    field.set(target, array);
+    invokeSetter(target, fieldName, fieldType, array);
   }
 
   /**
@@ -442,13 +439,13 @@ final class ConformanceRuntimeSupport {
    */
   static void setObjectArrayField(Object target, String fieldName, Object[] values)
       throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    Class<?> componentType = field.getType().getComponentType();
+    Class<?> fieldType = resolveGetter(target.getClass(), fieldName).getReturnType();
+    Class<?> componentType = fieldType.getComponentType();
     Object array = Array.newInstance(componentType, values.length);
     for (int index = 0; index < values.length; index++) {
       Array.set(array, index, values[index]);
     }
-    field.set(target, array);
+    invokeSetter(target, fieldName, fieldType, array);
   }
 
   /**
@@ -573,6 +570,73 @@ final class ConformanceRuntimeSupport {
       assertEquals(
           expected[index], number.longValue(), "Value mismatch: " + fieldName + "[" + index + "]");
     }
+  }
+
+  /**
+   * Invokes one generated getter for a field name.
+   *
+   * @param target target object
+   * @param fieldName field name
+   * @return getter return value
+   * @throws Exception when reflection access fails
+   */
+  private static Object invokeGetter(Object target, String fieldName) throws Exception {
+    Method getter = resolveGetter(target.getClass(), fieldName);
+    return getter.invoke(target);
+  }
+
+  /**
+   * Invokes one generated setter for a field name.
+   *
+   * @param target target object
+   * @param fieldName field name
+   * @param valueType parameter type accepted by setter
+   * @param value value to assign
+   * @throws Exception when reflection access fails
+   */
+  private static void invokeSetter(
+      Object target, String fieldName, Class<?> valueType, Object value) throws Exception {
+    Method setter = resolveSetter(target.getClass(), fieldName, valueType);
+    setter.invoke(target, value);
+  }
+
+  /**
+   * Resolves generated getter method by field name.
+   *
+   * @param targetType target class
+   * @param fieldName field name
+   * @return getter method
+   * @throws Exception when method resolution fails
+   */
+  private static Method resolveGetter(Class<?> targetType, String fieldName) throws Exception {
+    return targetType.getMethod("get" + toAccessorSuffix(fieldName));
+  }
+
+  /**
+   * Resolves generated setter method by field name and value type.
+   *
+   * @param targetType target class
+   * @param fieldName field name
+   * @param valueType setter parameter type
+   * @return setter method
+   * @throws Exception when method resolution fails
+   */
+  private static Method resolveSetter(Class<?> targetType, String fieldName, Class<?> valueType)
+      throws Exception {
+    return targetType.getMethod("set" + toAccessorSuffix(fieldName), valueType);
+  }
+
+  /**
+   * Converts a generated field name to the accessor suffix used by the generator.
+   *
+   * @param fieldName field name in camelCase
+   * @return accessor suffix in PascalCase
+   */
+  private static String toAccessorSuffix(String fieldName) {
+    if (fieldName == null || fieldName.isEmpty()) {
+      throw new IllegalArgumentException("Field name must not be empty.");
+    }
+    return Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
   }
 
   /**

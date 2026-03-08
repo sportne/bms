@@ -1,0 +1,25 @@
+---
+# Disable all checks by default, then enable specific groups.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-standalone-empty,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -modernize-use-trailing-return-type,
+  -readability-braces-around-statements
+
+# Treat warnings from these checks as errors to enforce compliance.
+WarningsAsErrors: 'bugprone-*,clang-analyzer-*,performance-*'
+
+# Match generated paths produced by test artifacts.
+HeaderFilterRegex: 'generated/'
+
+FormatStyle: file
+...

@@ -104,7 +104,7 @@ class JavaCodeGeneratorTest {
     assertEquals(expected, actual);
     assertTrue(
         actual.contains("expectedEventsCount = requireCount((this.count & 0xFFFFL), \"count\")"));
-    assertTrue(actual.contains("public short[] reusableVectorField;"));
+    assertTrue(actual.contains("public short[] getReusableVectorField()"));
     assertTrue(actual.contains("ArrayList<Short> itemPathDataList = new ArrayList<>();"));
   }
 
@@ -123,7 +123,7 @@ class JavaCodeGeneratorTest {
     String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
 
     assertEquals(expected, actual);
-    assertTrue(actual.contains("public String inlineName;"));
+    assertTrue(actual.contains("private String inlineName = \"\";"));
     assertTrue(actual.contains("getBytes(StandardCharsets.UTF_8)"));
     assertTrue(actual.contains("inlineName byte length must match count field nameLength"));
     assertTrue(actual.contains("toString(StandardCharsets.US_ASCII)"));
@@ -150,9 +150,9 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("validateChecksumRange(checksumSource.length, 0, 1"));
     assertTrue(actual.contains("writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);"));
     assertTrue(actual.contains("if (((this.version & 0xFFL) == 1L))"));
-    assertTrue(actual.contains("public short modeValue;"));
-    assertTrue(actual.contains("public int nestedValue;"));
-    assertTrue(actual.contains("public short alwaysValue;"));
+    assertTrue(actual.contains("public short getModeValue()"));
+    assertTrue(actual.contains("public int getNestedValue()"));
+    assertTrue(actual.contains("public short getAlwaysValue()"));
   }
 
   /** Contract: crc64 checksum fixtures generate deterministic Java checksum code paths. */
@@ -222,8 +222,8 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("if (((this.version & 0xFFL) >= 1L))"));
     assertTrue(actual.contains("&&"));
     assertTrue(actual.contains("||"));
-    assertTrue(actual.contains("public short betweenMode;"));
-    assertTrue(actual.contains("public short compoundMode;"));
+    assertTrue(actual.contains("public short getBetweenMode()"));
+    assertTrue(actual.contains("public short getCompoundMode()"));
   }
 
   /** Contract: the coverage fixture drives extended float/scaled/collection Java branches. */
@@ -534,7 +534,7 @@ class JavaCodeGeneratorTest {
     assertTrue(source.contains("writeInt64"));
     assertTrue(source.contains("readUInt64"));
     assertTrue(source.contains("readInt64"));
-    assertTrue(source.contains("public MissingMessage child;"));
+    assertTrue(source.contains("public MissingMessage getChild()"));
   }
 
   /** Contract: IO failures when writing files return a generator IO diagnostic. */

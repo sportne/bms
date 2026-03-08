@@ -396,7 +396,7 @@ public final class CppCodeGenerator {
         }
 
         std::array<std::uint8_t, 32> digest = {};
-        std::uint32_t hashWords[8] = {h0, h1, h2, h3, h4, h5, h6, h7};
+        const std::uint32_t hashWords[8] = {h0, h1, h2, h3, h4, h5, h6, h7};
         for (std::size_t index = 0; index < 8U; index++) {
           digest[index * 4U] = static_cast<std::uint8_t>((hashWords[index] >> 24U) & 0xFFU);
           digest[index * 4U + 1U] = static_cast<std::uint8_t>((hashWords[index] >> 16U) & 0xFFU);

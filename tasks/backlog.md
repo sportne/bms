@@ -27,7 +27,7 @@ Update progress here first.
 - [ ] Demonstrate project with real world message specification.
 - [x] Updating project documentation to reflect current project status.
 - [ ] Create users guide / man page.
-- [ ] Setup code analysis on generated code to the same standard as the code in the project. Use clang-tidy and cppcheck as in `../cpp-helper-libs/`.
+- [x] Setup code analysis on generated code to the same standard as the code in the project. Use clang-tidy and cppcheck as in `../cpp-helper-libs/`.
 - [ ] Wire up basic tests as part of check that use the natively compiled version of the application that only run when the correct toolchain (graalvm) are available.
 
 ## Later enhancements

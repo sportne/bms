@@ -9,7 +9,6 @@ import io.github.sportne.bms.BmsCompiler;
 import io.github.sportne.bms.model.resolved.ResolvedSchema;
 import io.github.sportne.bms.testutil.TestSupport;
 import java.lang.reflect.Array;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
@@ -324,7 +323,7 @@ class JavaGeneratedRuntimeE2ETest {
   }
 
   /**
-   * Sets one public field on a generated message instance.
+   * Sets one generated-property value on a generated message instance.
    *
    * @param target generated message object
    * @param fieldName field name to set
@@ -333,8 +332,8 @@ class JavaGeneratedRuntimeE2ETest {
    */
   private static void setFieldValue(Object target, String fieldName, Object value)
       throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    field.set(target, value);
+    Method getter = resolveGetter(target.getClass(), fieldName);
+    invokeSetter(target, fieldName, getter.getReturnType(), value);
   }
 
   /**
@@ -347,13 +346,13 @@ class JavaGeneratedRuntimeE2ETest {
    */
   private static void setArrayField(Object target, String fieldName, long[] values)
       throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    Class<?> componentType = field.getType().getComponentType();
+    Class<?> arrayType = resolveGetter(target.getClass(), fieldName).getReturnType();
+    Class<?> componentType = arrayType.getComponentType();
     Object array = Array.newInstance(componentType, values.length);
     for (int index = 0; index < values.length; index++) {
       setArrayValue(array, componentType, index, values[index]);
     }
-    field.set(target, array);
+    invokeSetter(target, fieldName, arrayType, array);
   }
 
   /**
@@ -386,7 +385,7 @@ class JavaGeneratedRuntimeE2ETest {
   }
 
   /**
-   * Reads one public field value from a generated message instance.
+   * Reads one generated-property value from a generated message instance.
    *
    * @param target generated message object
    * @param fieldName field name to read
@@ -394,8 +393,7 @@ class JavaGeneratedRuntimeE2ETest {
    * @throws Exception if reflection access fails
    */
   private static Object readFieldValue(Object target, String fieldName) throws Exception {
-    Field field = target.getClass().getField(fieldName);
-    return field.get(target);
+    return invokeGetter(target, fieldName);
   }
 
   /**
@@ -426,5 +424,72 @@ class JavaGeneratedRuntimeE2ETest {
       Number numericValue = (Number) Array.get(actual, index);
       assertEquals(expected[index], numericValue.longValue());
     }
+  }
+
+  /**
+   * Invokes one generated getter by field name.
+   *
+   * @param target target object
+   * @param fieldName field name
+   * @return getter result value
+   * @throws Exception if reflection invocation fails
+   */
+  private static Object invokeGetter(Object target, String fieldName) throws Exception {
+    Method getter = resolveGetter(target.getClass(), fieldName);
+    return getter.invoke(target);
+  }
+
+  /**
+   * Invokes one generated setter by field name and value type.
+   *
+   * @param target target object
+   * @param fieldName field name
+   * @param valueType setter parameter type
+   * @param value value to assign
+   * @throws Exception if reflection invocation fails
+   */
+  private static void invokeSetter(
+      Object target, String fieldName, Class<?> valueType, Object value) throws Exception {
+    Method setter = resolveSetter(target.getClass(), fieldName, valueType);
+    setter.invoke(target, value);
+  }
+
+  /**
+   * Resolves one generated getter method by field name.
+   *
+   * @param targetType generated class
+   * @param fieldName field name
+   * @return getter method
+   * @throws Exception if method resolution fails
+   */
+  private static Method resolveGetter(Class<?> targetType, String fieldName) throws Exception {
+    return targetType.getMethod("get" + toAccessorSuffix(fieldName));
+  }
+
+  /**
+   * Resolves one generated setter method by field name and value type.
+   *
+   * @param targetType generated class
+   * @param fieldName field name
+   * @param valueType setter parameter type
+   * @return setter method
+   * @throws Exception if method resolution fails
+   */
+  private static Method resolveSetter(Class<?> targetType, String fieldName, Class<?> valueType)
+      throws Exception {
+    return targetType.getMethod("set" + toAccessorSuffix(fieldName), valueType);
+  }
+
+  /**
+   * Converts one field name to the generator accessor suffix.
+   *
+   * @param fieldName field name in camelCase
+   * @return accessor suffix in PascalCase
+   */
+  private static String toAccessorSuffix(String fieldName) {
+    if (fieldName == null || fieldName.isEmpty()) {
+      throw new IllegalArgumentException("Field name must not be empty.");
+    }
+    return Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
   }
 }
