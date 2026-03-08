@@ -1,26 +1,43 @@
-# Backlog
+# Consolidated Task Tracker
 
-## P0
+This file is the single place to track what is still open.
 
-- [x] Lock Java baseline with deterministic generation and runtime end-to-end validation.
-- [x] Freeze `0.1.0` fixture matrix in `tasks/fixture-matrix-0.1.0.md`.
-- [x] Lock roadmap milestones and release checklist for `0.1.0` (`tasks/milestone-03.md` to `tasks/milestone-05.md` and `tasks/release-0.1.0-checklist.md`).
-- [x] Complete Milestone 03: C++ numeric + collection parity.
-- [x] Complete Milestone 04: C++ conditional parity.
-- [x] Complete Milestone 05: runtime conformance harness and `0.1.0` release hardening baseline.
+Detailed milestone and roadmap files still exist for context, but progress
+should be updated here first.
 
-## P1
+## Current release blockers (`0.1.0`)
 
-- [ ] Improve diagnostics with richer source location details (line/column where possible).
-- [ ] Improve CLI UX for multi-error summaries and next-step hints.
+- [X] CI `check` workflow is green on the release commit.
+- [X] CI native-image workflow is green on the release commit.
+- [X] Git tag `0.1.0` points to the exact release commit.
+- [X] Record migration notes from pre-`0.1.0` snapshots.
+
+## Next priority (`1.0.0` hardening)
+
+- [ ] Freeze compatibility policy for XSD, semantics, CLI, and generated APIs.
+- [ ] Improve diagnostics with clearer line/column details where possible.
+- [ ] Improve CLI multi-error summaries and next-step guidance.
+- [ ] Publish a release playbook and migration/support policy.
+- [ ] Add release-check automation for repeatable validation.
 - [ ] Add optional formatting pass for generated Java and C++ output.
-- [ ] Define `1.0.0` compatibility contract (freeze policy for XSD + CLI).
-- [ ] Execute `tasks/roadmap-1.0.0-hardening.md` slices 1-3.
 
-## P2
+## Later enhancements
 
 - [ ] Add Python generator.
 - [ ] Add Rust generator.
 - [ ] Add HTML documentation generation from BMS specs.
 - [ ] Add schema linting command.
 - [ ] Add import/export helpers.
+
+## Completed milestones snapshot
+
+- [x] Java baseline, deterministic generation, and Java runtime end-to-end checks.
+- [x] C++ numeric + collection parity.
+- [x] C++ conditional parity.
+- [x] Cross-language conformance harness and fixture matrix freeze.
+
+## Supporting documents
+
+- Release checklist: `tasks/release-0.1.0-checklist.md`
+- `0.1.0` fixture matrix: `tasks/fixture-matrix-0.1.0.md`
+- `1.0.0` hardening roadmap: `tasks/roadmap-1.0.0-hardening.md`

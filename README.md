@@ -121,7 +121,7 @@ The spec now requires `schema@namespace` and allows `messageType@namespace` over
 
 Roadmap and execution files:
 
-- [tasks/roadmap-0.1.0-to-1.0.md](tasks/roadmap-0.1.0-to-1.0.md)
+- [tasks/backlog.md](tasks/backlog.md)
 - [tasks/roadmap-1.0.0-hardening.md](tasks/roadmap-1.0.0-hardening.md)
 - [tasks/fixture-matrix-0.1.0.md](tasks/fixture-matrix-0.1.0.md)
 - [tasks/release-0.1.0-checklist.md](tasks/release-0.1.0-checklist.md)

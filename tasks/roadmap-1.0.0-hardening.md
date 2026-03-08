@@ -1,5 +1,7 @@
 # 1.0.0 Hardening Kickoff
 
+> Tracking note: open work is consolidated in `tasks/backlog.md`.
+
 This file defines the first three work slices after `0.1.0`.
 
 The goal is simple: move from "feature complete enough for early users" to "stable and predictable for long-term users."
