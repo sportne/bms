@@ -57,6 +57,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 /**
  * Generates Java source files from the resolved model.
@@ -66,6 +67,9 @@ import java.util.TreeSet;
  * staged conditional members ({@code varString} and {@code pad}).
  */
 public final class JavaCodeGenerator {
+  private static final Pattern IF_TEST_PATTERN =
+      Pattern.compile("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(==|!=)\\s*([^\\s]+)\\s*$");
+
   private static final String SHARED_IO_HELPERS =
       """
       /**
@@ -368,6 +372,124 @@ public final class JavaCodeGenerator {
           .indent(2)
           .replace("  \n", "\n");
 
+  private static final String CHECKSUM_IO_HELPERS =
+      """
+      /**
+       * Validates one checksum byte range against available source length.
+       *
+       * @param availableLength available byte count in the source
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @param algorithm checksum algorithm name
+       * @param rangeText original range text used in exception messages
+       */
+      private static void validateChecksumRange(
+          int availableLength,
+          int rangeStart,
+          int rangeEnd,
+          String algorithm,
+          String rangeText) {
+        if (rangeStart < 0 || rangeEnd < rangeStart || rangeEnd >= availableLength) {
+          throw new IllegalArgumentException(
+              "Checksum "
+                  + algorithm
+                  + " range "
+                  + rangeText
+                  + " is out of bounds for "
+                  + availableLength
+                  + " available bytes.");
+        }
+      }
+
+      /**
+       * Computes CRC-16/CCITT-FALSE over one byte-array range.
+       *
+       * @param source source bytes
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 16-bit checksum value
+       */
+      private static int crc16(byte[] source, int rangeStart, int rangeEnd) {
+        int crc = 0xFFFF;
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc ^= (source[index] & 0xFF) << 8;
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000) != 0) {
+              crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+            } else {
+              crc = (crc << 1) & 0xFFFF;
+            }
+          }
+        }
+        return crc & 0xFFFF;
+      }
+
+      /**
+       * Computes CRC-32 over one byte-array range.
+       *
+       * @param source source bytes
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 32-bit checksum value
+       */
+      private static long crc32(byte[] source, int rangeStart, int rangeEnd) {
+        CRC32 crc32 = new CRC32();
+        for (int index = rangeStart; index <= rangeEnd; index++) {
+          crc32.update(source[index] & 0xFF);
+        }
+        return crc32.getValue();
+      }
+
+      /**
+       * Computes CRC-16/CCITT-FALSE over one byte-buffer range.
+       *
+       * @param input source byte buffer
+       * @param messageStartPosition start index of the decoded message
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 16-bit checksum value
+       */
+      private static int crc16(
+          ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+        int absoluteStart = messageStartPosition + rangeStart;
+        int absoluteEnd = messageStartPosition + rangeEnd;
+        int crc = 0xFFFF;
+        for (int index = absoluteStart; index <= absoluteEnd; index++) {
+          crc ^= (input.get(index) & 0xFF) << 8;
+          for (int bit = 0; bit < 8; bit++) {
+            if ((crc & 0x8000) != 0) {
+              crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+            } else {
+              crc = (crc << 1) & 0xFFFF;
+            }
+          }
+        }
+        return crc & 0xFFFF;
+      }
+
+      /**
+       * Computes CRC-32 over one byte-buffer range.
+       *
+       * @param input source byte buffer
+       * @param messageStartPosition start index of the decoded message
+       * @param rangeStart first checksum byte index (inclusive)
+       * @param rangeEnd last checksum byte index (inclusive)
+       * @return computed 32-bit checksum value
+       */
+      private static long crc32(
+          ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+        int absoluteStart = messageStartPosition + rangeStart;
+        int absoluteEnd = messageStartPosition + rangeEnd;
+        CRC32 crc32 = new CRC32();
+        for (int index = absoluteStart; index <= absoluteEnd; index++) {
+          crc32.update(input.get(index) & 0xFF);
+        }
+        return crc32.getValue();
+      }
+      """
+          .indent(2)
+          .replace("  \n", "\n");
+
   /**
    * Writes generated Java files into the provided output directory.
    *
@@ -551,6 +673,15 @@ public final class JavaCodeGenerator {
       throws BmsException {
     List<Diagnostic> diagnostics = new ArrayList<>();
     Map<String, PrimitiveType> primitiveFieldByName = primitiveFieldsByName(messageType);
+    Set<String> flattenedMemberNames = new java.util.LinkedHashSet<>();
+
+    checkFlattenedMemberNames(
+        messageType.name(),
+        messageType.members(),
+        flattenedMemberNames,
+        outputPath,
+        diagnostics,
+        "message");
 
     for (ResolvedMessageMember member : messageType.members()) {
       checkMemberSupport(
@@ -571,13 +702,32 @@ public final class JavaCodeGenerator {
    */
   private static Map<String, PrimitiveType> primitiveFieldsByName(ResolvedMessageType messageType) {
     Map<String, PrimitiveType> primitiveFieldByName = new LinkedHashMap<>();
-    for (ResolvedMessageMember member : messageType.members()) {
+    collectPrimitiveFields(primitiveFieldByName, messageType.members());
+    return Map.copyOf(primitiveFieldByName);
+  }
+
+  /**
+   * Collects primitive scalar field types from message members recursively.
+   *
+   * @param primitiveFieldByName destination primitive-field lookup map
+   * @param members members to scan
+   */
+  private static void collectPrimitiveFields(
+      Map<String, PrimitiveType> primitiveFieldByName, List<ResolvedMessageMember> members) {
+    for (ResolvedMessageMember member : members) {
       if (member instanceof ResolvedField resolvedField
           && resolvedField.typeRef() instanceof PrimitiveTypeRef primitiveTypeRef) {
-        primitiveFieldByName.put(resolvedField.name(), primitiveTypeRef.primitiveType());
+        primitiveFieldByName.putIfAbsent(resolvedField.name(), primitiveTypeRef.primitiveType());
+        continue;
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        collectPrimitiveFields(primitiveFieldByName, resolvedIfBlock.members());
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        collectPrimitiveFields(primitiveFieldByName, resolvedNestedType.members());
       }
     }
-    return Map.copyOf(primitiveFieldByName);
   }
 
   /**
@@ -649,37 +799,245 @@ public final class JavaCodeGenerator {
       return;
     }
     if (member instanceof ResolvedChecksum resolvedChecksum) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "checksum "
-                  + resolvedChecksum.algorithm()
-                  + "(range=\""
-                  + resolvedChecksum.range()
-                  + "\")",
-              outputPath.toString()));
+      checkChecksumSupport(resolvedChecksum, messageType, outputPath, diagnostics);
       return;
     }
     if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "if(test=\"" + resolvedIfBlock.test() + "\")",
-              outputPath.toString()));
+      checkIfBlockSupport(
+          resolvedIfBlock,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
       return;
     }
     if (member instanceof ResolvedMessageType resolvedNestedMessageType) {
-      diagnostics.add(
-          unsupportedMemberDiagnostic(
-              messageType.name(),
-              "nested type " + resolvedNestedMessageType.name(),
-              outputPath.toString()));
+      checkNestedTypeSupport(
+          resolvedNestedMessageType,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
       return;
     }
 
     diagnostics.add(
         unsupportedMemberDiagnostic(
             messageType.name(), member.getClass().getSimpleName(), outputPath.toString()));
+  }
+
+  /**
+   * Checks support for checksum members.
+   *
+   * @param resolvedChecksum checksum definition to validate
+   * @param messageType parent message type
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkChecksumSupport(
+      ResolvedChecksum resolvedChecksum,
+      ResolvedMessageType messageType,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    if (!isSupportedChecksumAlgorithm(resolvedChecksum.algorithm())) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "checksum " + resolvedChecksum.algorithm() + "(unsupported algorithm)",
+              outputPath.toString()));
+      return;
+    }
+
+    if (parseChecksumRange(resolvedChecksum.range()) == null) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "checksum " + resolvedChecksum.algorithm() + "(invalid range)",
+              outputPath.toString()));
+    }
+  }
+
+  /**
+   * Checks support for conditional blocks and recursively validates contained members.
+   *
+   * @param resolvedIfBlock conditional block to validate
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkIfBlockSupport(
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    IfCondition ifCondition = parseIfCondition(resolvedIfBlock.test());
+    if (ifCondition == null) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "if(test=\"" + resolvedIfBlock.test() + "\")",
+              outputPath.toString()));
+    } else {
+      validateIfConditionLiteral(
+          ifCondition, messageType, primitiveFieldByName, outputPath, diagnostics);
+    }
+
+    for (ResolvedMessageMember nestedMember : resolvedIfBlock.members()) {
+      checkMemberSupport(
+          nestedMember,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+    }
+  }
+
+  /**
+   * Checks support for nested message definitions and recursively validates contained members.
+   *
+   * @param resolvedNestedType nested message definition
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void checkNestedTypeSupport(
+      ResolvedMessageType resolvedNestedType,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    for (ResolvedMessageMember nestedMember : resolvedNestedType.members()) {
+      checkMemberSupport(
+          nestedMember,
+          messageType,
+          generationContext,
+          primitiveFieldByName,
+          outputPath,
+          diagnostics);
+    }
+  }
+
+  /**
+   * Validates one parsed if-condition literal against the referenced primitive field type.
+   *
+   * @param ifCondition parsed condition components
+   * @param messageType parent message type
+   * @param primitiveFieldByName primitive field lookup map
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   */
+  private static void validateIfConditionLiteral(
+      IfCondition ifCondition,
+      ResolvedMessageType messageType,
+      Map<String, PrimitiveType> primitiveFieldByName,
+      Path outputPath,
+      List<Diagnostic> diagnostics) {
+    PrimitiveType primitiveType = primitiveFieldByName.get(ifCondition.fieldName());
+    if (primitiveType == null) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "if(test=\"" + ifCondition.rawTest() + "\") field was not found",
+              outputPath.toString()));
+      return;
+    }
+    if (!fitsPrimitiveRange(ifCondition.literal(), primitiveType)) {
+      diagnostics.add(
+          unsupportedMemberDiagnostic(
+              messageType.name(),
+              "if(test=\"" + ifCondition.rawTest() + "\") literal is out of range",
+              outputPath.toString()));
+    }
+  }
+
+  /**
+   * Rejects flattened member-name collisions that would produce duplicate Java fields.
+   *
+   * @param ownerName parent message name used in diagnostics
+   * @param members members to scan
+   * @param flattenedMemberNames destination set of generated field names
+   * @param outputPath output path used in diagnostics
+   * @param diagnostics destination diagnostics list
+   * @param ownerContext short owner label used in diagnostic text
+   */
+  private static void checkFlattenedMemberNames(
+      String ownerName,
+      List<ResolvedMessageMember> members,
+      Set<String> flattenedMemberNames,
+      Path outputPath,
+      List<Diagnostic> diagnostics,
+      String ownerContext) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        checkFlattenedMemberNames(
+            ownerName,
+            resolvedIfBlock.members(),
+            flattenedMemberNames,
+            outputPath,
+            diagnostics,
+            "if block");
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        checkFlattenedMemberNames(
+            ownerName,
+            resolvedNestedType.members(),
+            flattenedMemberNames,
+            outputPath,
+            diagnostics,
+            "nested type " + resolvedNestedType.name());
+        continue;
+      }
+      if (!isDeclarableMember(member)) {
+        continue;
+      }
+      String flattenedName = memberName(member);
+      if (!flattenedMemberNames.add(flattenedName)) {
+        diagnostics.add(
+            unsupportedMemberDiagnostic(
+                ownerName,
+                ownerContext + " member name collision for " + flattenedName,
+                outputPath.toString()));
+      }
+    }
+  }
+
+  /**
+   * Returns whether one member kind produces a generated Java field declaration.
+   *
+   * @param member member to inspect
+   * @return {@code true} when the member is emitted as a Java field
+   */
+  private static boolean isDeclarableMember(ResolvedMessageMember member) {
+    return member instanceof ResolvedField
+        || member instanceof ResolvedBitField
+        || member instanceof ResolvedFloat
+        || member instanceof ResolvedScaledInt
+        || member instanceof ResolvedArray
+        || member instanceof ResolvedVector
+        || member instanceof ResolvedBlobArray
+        || member instanceof ResolvedBlobVector
+        || member instanceof ResolvedVarString;
+  }
+
+  /**
+   * Returns whether one checksum algorithm is implemented in this milestone.
+   *
+   * @param algorithm checksum algorithm literal from the resolved model
+   * @return {@code true} when encode/decode logic exists for the algorithm
+   */
+  private static boolean isSupportedChecksumAlgorithm(String algorithm) {
+    return "crc16".equals(algorithm) || "crc32".equals(algorithm);
   }
 
   /**
@@ -1304,6 +1662,9 @@ public final class JavaCodeGenerator {
     appendDecodeMethods(builder, messageType, generationContext);
 
     builder.append(SHARED_IO_HELPERS);
+    if (containsChecksumMember(messageType.members())) {
+      builder.append(CHECKSUM_IO_HELPERS);
+    }
     builder.append("}\n");
 
     return builder.toString();
@@ -1325,6 +1686,9 @@ public final class JavaCodeGenerator {
     imports.add("java.nio.charset.StandardCharsets");
     imports.add("java.util.ArrayList");
     imports.add("java.util.Objects");
+    if (containsChecksumMember(messageType.members())) {
+      imports.add("java.util.zip.CRC32");
+    }
 
     collectMessageImports(imports, messageType, generationContext);
 
@@ -1332,6 +1696,29 @@ public final class JavaCodeGenerator {
       builder.append("import ").append(javaImport).append(";\n");
     }
     builder.append("\n");
+  }
+
+  /**
+   * Returns whether one member list contains a checksum member recursively.
+   *
+   * @param members members to inspect
+   * @return {@code true} when at least one checksum member is present
+   */
+  private static boolean containsChecksumMember(List<ResolvedMessageMember> members) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedChecksum) {
+        return true;
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock
+          && containsChecksumMember(resolvedIfBlock.members())) {
+        return true;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType
+          && containsChecksumMember(resolvedNestedType.members())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1343,24 +1730,43 @@ public final class JavaCodeGenerator {
    */
   private static void collectMessageImports(
       Set<String> imports, ResolvedMessageType messageType, GenerationContext generationContext) {
-    for (ResolvedMessageMember member : messageType.members()) {
+    collectMessageImportsForMembers(
+        imports, messageType.members(), messageType.effectiveNamespace(), generationContext);
+  }
+
+  /**
+   * Collects message-type imports for one member list recursively.
+   *
+   * @param imports destination import set
+   * @param members members to inspect
+   * @param currentNamespace namespace of the current generated message
+   * @param generationContext reusable lookup maps
+   */
+  private static void collectMessageImportsForMembers(
+      Set<String> imports,
+      List<ResolvedMessageMember> members,
+      String currentNamespace,
+      GenerationContext generationContext) {
+    for (ResolvedMessageMember member : members) {
       if (member instanceof ResolvedField resolvedField) {
         collectMessageImportsFromTypeRef(
-            imports, resolvedField.typeRef(), messageType.effectiveNamespace(), generationContext);
+            imports, resolvedField.typeRef(), currentNamespace, generationContext);
       }
       if (member instanceof ResolvedArray resolvedArray) {
         collectMessageImportsFromTypeRef(
-            imports,
-            resolvedArray.elementTypeRef(),
-            messageType.effectiveNamespace(),
-            generationContext);
+            imports, resolvedArray.elementTypeRef(), currentNamespace, generationContext);
       }
       if (member instanceof ResolvedVector resolvedVector) {
         collectMessageImportsFromTypeRef(
-            imports,
-            resolvedVector.elementTypeRef(),
-            messageType.effectiveNamespace(),
-            generationContext);
+            imports, resolvedVector.elementTypeRef(), currentNamespace, generationContext);
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        collectMessageImportsForMembers(
+            imports, resolvedIfBlock.members(), currentNamespace, generationContext);
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        collectMessageImportsForMembers(
+            imports, resolvedNestedType.members(), currentNamespace, generationContext);
       }
     }
   }
@@ -1417,8 +1823,32 @@ public final class JavaCodeGenerator {
    */
   private static void appendMemberDeclarations(
       StringBuilder builder, ResolvedMessageType messageType, GenerationContext generationContext) {
-    for (ResolvedMessageMember member : messageType.members()) {
-      if (member instanceof ResolvedPad) {
+    appendMemberDeclarationsForMembers(builder, messageType.members(), generationContext);
+    builder.append("\n");
+  }
+
+  /**
+   * Appends field declarations for one member list recursively.
+   *
+   * @param builder destination source builder
+   * @param members members to render
+   * @param generationContext reusable lookup maps
+   */
+  private static void appendMemberDeclarationsForMembers(
+      StringBuilder builder,
+      List<ResolvedMessageMember> members,
+      GenerationContext generationContext) {
+    for (ResolvedMessageMember member : members) {
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        appendMemberDeclarationsForMembers(builder, resolvedIfBlock.members(), generationContext);
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        appendMemberDeclarationsForMembers(
+            builder, resolvedNestedType.members(), generationContext);
+        continue;
+      }
+      if (!isDeclarableMember(member)) {
         continue;
       }
       builder
@@ -1428,7 +1858,6 @@ public final class JavaCodeGenerator {
           .append(memberName(member))
           .append(";\n");
     }
-    builder.append("\n");
   }
 
   /**
@@ -1599,11 +2028,30 @@ public final class JavaCodeGenerator {
    */
   private static void appendBitFieldHelpers(
       StringBuilder builder, ResolvedMessageType messageType) {
-    for (ResolvedMessageMember member : messageType.members()) {
+    appendBitFieldHelpersForMembers(builder, messageType.members());
+  }
+
+  /**
+   * Appends bitField helper methods for one member list recursively.
+   *
+   * @param builder destination source builder
+   * @param members members to scan
+   */
+  private static void appendBitFieldHelpersForMembers(
+      StringBuilder builder, List<ResolvedMessageMember> members) {
+    for (ResolvedMessageMember member : members) {
       if (member instanceof ResolvedBitField resolvedBitField) {
         appendBitFieldRawHelpers(builder, resolvedBitField);
         appendBitFieldFlagHelpers(builder, resolvedBitField);
         appendBitFieldSegmentHelpers(builder, resolvedBitField);
+        continue;
+      }
+      if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+        appendBitFieldHelpersForMembers(builder, resolvedIfBlock.members());
+        continue;
+      }
+      if (member instanceof ResolvedMessageType resolvedNestedType) {
+        appendBitFieldHelpersForMembers(builder, resolvedNestedType.members());
       }
     }
   }
@@ -1858,12 +2306,31 @@ public final class JavaCodeGenerator {
     builder.append("  public byte[] encode() {\n");
     builder.append("    ByteArrayOutputStream out = new ByteArrayOutputStream();\n");
 
-    for (ResolvedMessageMember member : messageType.members()) {
-      appendEncodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
-    }
+    appendEncodeMembers(
+        builder, messageType.members(), messageType, generationContext, primitiveFieldByName);
 
     builder.append("    return out.toByteArray();\n");
     builder.append("  }\n\n");
+  }
+
+  /**
+   * Appends encode statements for one member list recursively.
+   *
+   * @param builder destination source builder
+   * @param members members to encode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendEncodeMembers(
+      StringBuilder builder,
+      List<ResolvedMessageMember> members,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    for (ResolvedMessageMember member : members) {
+      appendEncodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
+    }
   }
 
   /**
@@ -1947,6 +2414,24 @@ public final class JavaCodeGenerator {
     }
     if (member instanceof ResolvedPad resolvedPad) {
       appendEncodePad(builder, resolvedPad);
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      appendEncodeChecksum(builder, resolvedChecksum);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      appendEncodeIfBlock(
+          builder, resolvedIfBlock, messageType, generationContext, primitiveFieldByName);
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      appendEncodeMembers(
+          builder,
+          resolvedNestedType.members(),
+          messageType,
+          generationContext,
+          primitiveFieldByName);
       return;
     }
 
@@ -2790,6 +3275,71 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Appends checksum encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedChecksum checksum definition
+   */
+  private static void appendEncodeChecksum(
+      StringBuilder builder, ResolvedChecksum resolvedChecksum) {
+    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    builder
+        .append("    {\n")
+        .append("      byte[] checksumSource = out.toByteArray();\n")
+        .append("      validateChecksumRange(checksumSource.length, ")
+        .append(checksumRange.startInclusive())
+        .append(", ")
+        .append(checksumRange.endInclusive())
+        .append(", \"")
+        .append(resolvedChecksum.algorithm())
+        .append("\", \"")
+        .append(resolvedChecksum.range())
+        .append("\");\n");
+
+    if ("crc16".equals(resolvedChecksum.algorithm())) {
+      builder
+          .append("      int checksumValue = crc16(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);\n");
+    } else {
+      builder
+          .append("      long checksumValue = crc32(checksumSource, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      writeUInt32(out, checksumValue, ByteOrder.BIG_ENDIAN);\n");
+    }
+    builder.append("    }\n");
+  }
+
+  /**
+   * Appends conditional-block encode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedIfBlock if-block definition
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendEncodeIfBlock(
+      StringBuilder builder,
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    String conditionExpression =
+        ifConditionExpression(resolvedIfBlock.test(), "this.", primitiveFieldByName);
+    builder.append("    if (").append(conditionExpression).append(") {\n");
+    appendEncodeMembers(
+        builder, resolvedIfBlock.members(), messageType, generationContext, primitiveFieldByName);
+    builder.append("    }\n");
+  }
+
+  /**
    * Resolves optional terminator literal from a length mode.
    *
    * @param lengthMode vector/blob length mode
@@ -2858,7 +3408,11 @@ public final class JavaCodeGenerator {
         .append("  public static ")
         .append(messageType.name())
         .append(" decode(ByteBuffer input) {\n")
-        .append("    Objects.requireNonNull(input, \"input\");\n")
+        .append("    Objects.requireNonNull(input, \"input\");\n");
+    if (containsChecksumMember(messageType.members())) {
+      builder.append("    int messageStartPosition = input.position();\n");
+    }
+    builder
         .append("    ")
         .append(messageType.name())
         .append(" value = new ")
@@ -2866,12 +3420,31 @@ public final class JavaCodeGenerator {
         .append("();\n");
 
     Map<String, PrimitiveType> primitiveFieldByName = primitiveFieldsByName(messageType);
-    for (ResolvedMessageMember member : messageType.members()) {
-      appendDecodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
-    }
+    appendDecodeMembers(
+        builder, messageType.members(), messageType, generationContext, primitiveFieldByName);
 
     builder.append("    return value;\n");
     builder.append("  }\n\n");
+  }
+
+  /**
+   * Appends decode statements for one member list recursively.
+   *
+   * @param builder destination source builder
+   * @param members members to decode
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendDecodeMembers(
+      StringBuilder builder,
+      List<ResolvedMessageMember> members,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    for (ResolvedMessageMember member : members) {
+      appendDecodeMember(builder, member, messageType, generationContext, primitiveFieldByName);
+    }
   }
 
   /**
@@ -2952,6 +3525,24 @@ public final class JavaCodeGenerator {
     }
     if (member instanceof ResolvedPad resolvedPad) {
       appendDecodePad(builder, resolvedPad);
+      return;
+    }
+    if (member instanceof ResolvedChecksum resolvedChecksum) {
+      appendDecodeChecksum(builder, resolvedChecksum);
+      return;
+    }
+    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
+      appendDecodeIfBlock(
+          builder, resolvedIfBlock, messageType, generationContext, primitiveFieldByName);
+      return;
+    }
+    if (member instanceof ResolvedMessageType resolvedNestedType) {
+      appendDecodeMembers(
+          builder,
+          resolvedNestedType.members(),
+          messageType,
+          generationContext,
+          primitiveFieldByName);
       return;
     }
 
@@ -3770,6 +4361,80 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Appends checksum decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedChecksum checksum definition
+   */
+  private static void appendDecodeChecksum(
+      StringBuilder builder, ResolvedChecksum resolvedChecksum) {
+    ChecksumRange checksumRange = requiredChecksumRange(resolvedChecksum.range());
+    builder
+        .append("    {\n")
+        .append("      validateChecksumRange(input.limit() - messageStartPosition, ")
+        .append(checksumRange.startInclusive())
+        .append(", ")
+        .append(checksumRange.endInclusive())
+        .append(", \"")
+        .append(resolvedChecksum.algorithm())
+        .append("\", \"")
+        .append(resolvedChecksum.range())
+        .append("\");\n");
+
+    if ("crc16".equals(resolvedChecksum.algorithm())) {
+      builder
+          .append("      int expectedChecksum = readUInt16(input, ByteOrder.BIG_ENDIAN);\n")
+          .append("      int actualChecksum = crc16(input, messageStartPosition, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      if (expectedChecksum != actualChecksum) {\n")
+          .append("        throw new IllegalArgumentException(\"Checksum mismatch for crc16 range ")
+          .append(resolvedChecksum.range())
+          .append(". Expected \" + expectedChecksum + \", computed \" + actualChecksum + '.');\n")
+          .append("      }\n");
+    } else {
+      builder
+          .append("      long expectedChecksum = readUInt32(input, ByteOrder.BIG_ENDIAN);\n")
+          .append("      long actualChecksum = crc32(input, messageStartPosition, ")
+          .append(checksumRange.startInclusive())
+          .append(", ")
+          .append(checksumRange.endInclusive())
+          .append(");\n")
+          .append("      if (expectedChecksum != actualChecksum) {\n")
+          .append("        throw new IllegalArgumentException(\"Checksum mismatch for crc32 range ")
+          .append(resolvedChecksum.range())
+          .append(". Expected \" + expectedChecksum + \", computed \" + actualChecksum + '.');\n")
+          .append("      }\n");
+    }
+    builder.append("    }\n");
+  }
+
+  /**
+   * Appends conditional-block decode statements.
+   *
+   * @param builder destination source builder
+   * @param resolvedIfBlock if-block definition
+   * @param messageType parent message type
+   * @param generationContext reusable lookup maps
+   * @param primitiveFieldByName primitive field lookup map
+   */
+  private static void appendDecodeIfBlock(
+      StringBuilder builder,
+      ResolvedIfBlock resolvedIfBlock,
+      ResolvedMessageType messageType,
+      GenerationContext generationContext,
+      Map<String, PrimitiveType> primitiveFieldByName) {
+    String conditionExpression =
+        ifConditionExpression(resolvedIfBlock.test(), "value.", primitiveFieldByName);
+    builder.append("    if (").append(conditionExpression).append(") {\n");
+    appendDecodeMembers(
+        builder, resolvedIfBlock.members(), messageType, generationContext, primitiveFieldByName);
+    builder.append("    }\n");
+  }
+
+  /**
    * Converts one primitive decode operation into a Java expression.
    *
    * @param primitiveType primitive type to decode
@@ -3890,6 +4555,119 @@ public final class JavaCodeGenerator {
   }
 
   /**
+   * Parses one checksum range string in the form {@code start..end}.
+   *
+   * @param rangeText checksum range text from XML
+   * @return parsed checksum range, or {@code null} when invalid
+   */
+  private static ChecksumRange parseChecksumRange(String rangeText) {
+    int separator = rangeText.indexOf("..");
+    if (separator < 0 || separator != rangeText.lastIndexOf("..")) {
+      return null;
+    }
+
+    String startText = rangeText.substring(0, separator).trim();
+    String endText = rangeText.substring(separator + 2).trim();
+    if (startText.isEmpty() || endText.isEmpty()) {
+      return null;
+    }
+
+    try {
+      BigInteger start = parseNumericLiteral(startText);
+      BigInteger end = parseNumericLiteral(endText);
+      if (start.compareTo(BigInteger.ZERO) < 0 || end.compareTo(BigInteger.ZERO) < 0) {
+        return null;
+      }
+      if (start.compareTo(end) > 0) {
+        return null;
+      }
+      if (start.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0
+          || end.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) > 0) {
+        return null;
+      }
+      return new ChecksumRange(start.intValueExact(), end.intValueExact());
+    } catch (NumberFormatException | ArithmeticException exception) {
+      return null;
+    }
+  }
+
+  /**
+   * Parses one if-condition expression.
+   *
+   * <p>The supported syntax is {@code field == literal} or {@code field != literal}.
+   *
+   * @param test raw if@test text
+   * @return parsed condition, or {@code null} when unsupported
+   */
+  private static IfCondition parseIfCondition(String test) {
+    java.util.regex.Matcher matcher = IF_TEST_PATTERN.matcher(test);
+    if (!matcher.matches()) {
+      return null;
+    }
+
+    try {
+      return new IfCondition(
+          test, matcher.group(1), matcher.group(2), parseNumericLiteral(matcher.group(3)));
+    } catch (NumberFormatException exception) {
+      return null;
+    }
+  }
+
+  /**
+   * Resolves and renders one if-condition expression for generated Java code.
+   *
+   * @param test raw if@test expression
+   * @param ownerPrefix expression prefix for the owning value ({@code this.} or {@code value.})
+   * @param primitiveFieldByName primitive field lookup map
+   * @return Java boolean expression that evaluates the condition
+   */
+  private static String ifConditionExpression(
+      String test, String ownerPrefix, Map<String, PrimitiveType> primitiveFieldByName) {
+    IfCondition ifCondition = parseIfCondition(test);
+    if (ifCondition == null) {
+      throw new IllegalStateException("Unsupported if@test expression: " + test);
+    }
+    PrimitiveType primitiveType = primitiveFieldByName.get(ifCondition.fieldName());
+    if (primitiveType == null) {
+      throw new IllegalStateException("if@test references unknown primitive field: " + test);
+    }
+
+    String operator = "==".equals(ifCondition.operator()) ? "==" : "!=";
+    String fieldExpression = ownerPrefix + ifCondition.fieldName();
+    if (primitiveType == PrimitiveType.UINT64) {
+      String comparisonOperator = "==".equals(operator) ? "==" : "!=";
+      return "(Long.compareUnsigned("
+          + fieldExpression
+          + ", Long.parseUnsignedLong(\""
+          + ifCondition.literal()
+          + "\")) "
+          + comparisonOperator
+          + " 0)";
+    }
+    return "("
+        + countExpression(fieldExpression, primitiveType)
+        + " "
+        + operator
+        + " "
+        + ifCondition.literal()
+        + "L)";
+  }
+
+  /**
+   * Parses a checksum range and fails hard when the value is unexpectedly invalid.
+   *
+   * @param rangeText checksum range text from XML
+   * @return parsed checksum range
+   */
+  private static ChecksumRange requiredChecksumRange(String rangeText) {
+    ChecksumRange checksumRange = parseChecksumRange(rangeText);
+    if (checksumRange == null) {
+      throw new IllegalStateException("Unsupported checksum range: " + rangeText);
+    }
+    return checksumRange;
+  }
+
+  /**
    * Parses one numeric literal used by terminator modes.
    *
    * @param literal raw literal text from XML
@@ -3986,6 +4764,25 @@ public final class JavaCodeGenerator {
     BigDecimal safeDecimal = decimal == null ? BigDecimal.ZERO : decimal;
     return safeDecimal.toPlainString() + "d";
   }
+
+  /**
+   * Parsed checksum range bounds.
+   *
+   * @param startInclusive first byte index (inclusive)
+   * @param endInclusive last byte index (inclusive)
+   */
+  private record ChecksumRange(int startInclusive, int endInclusive) {}
+
+  /**
+   * Parsed if-condition components.
+   *
+   * @param rawTest original if@test text
+   * @param fieldName referenced field name
+   * @param operator supported operator ({@code ==} or {@code !=})
+   * @param literal parsed numeric literal
+   */
+  private record IfCondition(
+      String rawTest, String fieldName, String operator, BigInteger literal) {}
 
   /** Immutable lookup maps used while rendering one schema. */
   private record GenerationContext(

@@ -40,7 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
  * Contract tests for the Java generator.
  *
  * <p>These tests define what must remain stable for generated Java output and how unsupported
- * deferred member kinds must be reported.
+ * member combinations must be reported.
  */
 class JavaCodeGeneratorTest {
 
@@ -130,6 +130,31 @@ class JavaCodeGeneratorTest {
     assertTrue(actual.contains("inlineName byte length must match count field nameLength"));
     assertTrue(actual.contains("toString(StandardCharsets.US_ASCII)"));
     assertTrue(actual.contains("for (int padIndex = 0; padIndex < 2; padIndex++)"));
+  }
+
+  /** Contract: full conditional backend fixture generates deterministic checksum/if/type output. */
+  @Test
+  void javaGeneratorProducesDeterministicConditionalBackendOutput() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/conditional-backend-valid.xml");
+
+    generator.generate(schema, tempDir);
+    generator.generate(schema, tempDir);
+
+    Path outputPath =
+        tempDir.resolve("acme/telemetry/conditional/backend/ConditionalBackendFrame.java");
+    String expected =
+        TestSupport.readResource(
+            "golden/java/acme/telemetry/conditional/backend/ConditionalBackendFrame.java");
+    String actual = Files.readString(outputPath, StandardCharsets.UTF_8);
+
+    assertEquals(expected, actual);
+    assertTrue(actual.contains("validateChecksumRange(checksumSource.length, 0, 1"));
+    assertTrue(actual.contains("writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);"));
+    assertTrue(actual.contains("if (((this.version & 0xFFL) == 1L))"));
+    assertTrue(actual.contains("public short modeValue;"));
+    assertTrue(actual.contains("public int nestedValue;"));
+    assertTrue(actual.contains("public short alwaysValue;"));
   }
 
   /** Contract: the coverage fixture drives extended float/scaled/collection Java branches. */
@@ -302,15 +327,39 @@ class JavaCodeGeneratorTest {
     assertTrue(diagnosticsText.contains("ResolvedScaledInt(baseType=UINT64)"));
   }
 
-  /** Contract: milestone-03 members still fail clearly because backend emission is deferred. */
+  /** Contract: unsupported if-expression syntax fails with a clear Java-generator diagnostic. */
   @Test
-  void javaGeneratorFailsWithClearDiagnosticsForDeferredMilestoneThreeMembers() throws Exception {
+  void javaGeneratorFailsWithClearDiagnosticsForUnsupportedIfTestExpression() throws Exception {
     JavaCodeGenerator generator = new JavaCodeGenerator();
-    ResolvedSchema schema = compileFixture("specs/milestone-03-valid.xml");
+    ResolvedSchema schema = compileFixture("specs/conditional-if-unsupported-test.xml");
 
     BmsException exception =
         assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
 
+    String diagnosticsText =
+        exception.diagnostics().stream()
+            .map(diagnostic -> diagnostic.message())
+            .collect(Collectors.joining("\n"));
+    assertTrue(diagnosticsText.contains("if(test=\"version > 1\")"));
+    assertTrue(
+        exception.diagnostics().stream()
+            .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));
+  }
+
+  /** Contract: invalid checksum range syntax fails with a clear Java-generator diagnostic. */
+  @Test
+  void javaGeneratorFailsWithClearDiagnosticsForInvalidChecksumRange() throws Exception {
+    JavaCodeGenerator generator = new JavaCodeGenerator();
+    ResolvedSchema schema = compileFixture("specs/checksum-invalid-range.xml");
+
+    BmsException exception =
+        assertThrows(BmsException.class, () -> generator.generate(schema, tempDir));
+
+    String diagnosticsText =
+        exception.diagnostics().stream()
+            .map(diagnostic -> diagnostic.message())
+            .collect(Collectors.joining("\n"));
+    assertTrue(diagnosticsText.contains("checksum crc16(invalid range)"));
     assertTrue(
         exception.diagnostics().stream()
             .anyMatch(diagnostic -> diagnostic.code().equals("GENERATOR_JAVA_UNSUPPORTED_MEMBER")));

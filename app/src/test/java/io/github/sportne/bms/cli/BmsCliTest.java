@@ -128,6 +128,26 @@ class BmsCliTest {
   }
 
   @Test
+  /** Contract: `validate` succeeds for full Java-conditional backend fixture input. */
+  void validateCommandReturnsSuccessForConditionalBackendSpec() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "validate", TestSupport.resourcePath("specs/conditional-backend-valid.xml").toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertTrue(stdoutBuffer.toString(StandardCharsets.UTF_8).contains("Validation succeeded"));
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   /** Contract: invalid specs produce exit code 1 and include an XSD diagnostic. */
   void validateCommandReturnsSpecErrorForInvalidSpec() {
     BmsCli cli = new BmsCli();
@@ -198,19 +218,74 @@ class BmsCliTest {
   }
 
   @Test
-  /** Contract: generation fails clearly for deferred milestone-03 members. */
-  void generateCommandReturnsSpecErrorForUnsupportedMilestoneThreeMembers() {
+  /** Contract: Java generation succeeds for checksum/if/nested conditional backend fixture. */
+  void generateCommandReturnsSuccessForConditionalBackendFixture() {
     BmsCli cli = new BmsCli();
     ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
     ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
 
-    Path javaOutputDir = tempDir.resolve("java-milestone-three");
+    Path javaOutputDir = tempDir.resolve("java-conditional-backend");
 
     int exitCode =
         cli.run(
             new String[] {
               "generate",
-              TestSupport.resourcePath("specs/milestone-03-valid.xml").toString(),
+              TestSupport.resourcePath("specs/conditional-backend-valid.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(0, exitCode);
+    assertEquals("", stderrBuffer.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        Files.exists(
+            javaOutputDir.resolve(
+                "acme/telemetry/conditional/backend/ConditionalBackendFrame.java")));
+  }
+
+  @Test
+  /** Contract: unsupported if-expression syntax still fails clearly in Java generation. */
+  void generateCommandReturnsSpecErrorForUnsupportedIfTestExpression() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-conditional-unsupported-if");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/conditional-if-unsupported-test.xml").toString(),
+              "--java",
+              javaOutputDir.toString()
+            },
+            new PrintStream(stdoutBuffer, true, StandardCharsets.UTF_8),
+            new PrintStream(stderrBuffer, true, StandardCharsets.UTF_8));
+
+    assertEquals(1, exitCode);
+    assertTrue(
+        stderrBuffer
+            .toString(StandardCharsets.UTF_8)
+            .contains("GENERATOR_JAVA_UNSUPPORTED_MEMBER"));
+  }
+
+  @Test
+  /** Contract: invalid checksum ranges fail clearly during Java generation. */
+  void generateCommandReturnsSpecErrorForInvalidChecksumRange() {
+    BmsCli cli = new BmsCli();
+    ByteArrayOutputStream stdoutBuffer = new ByteArrayOutputStream();
+    ByteArrayOutputStream stderrBuffer = new ByteArrayOutputStream();
+
+    Path javaOutputDir = tempDir.resolve("java-invalid-checksum-range");
+
+    int exitCode =
+        cli.run(
+            new String[] {
+              "generate",
+              TestSupport.resourcePath("specs/checksum-invalid-range.xml").toString(),
               "--java",
               javaOutputDir.toString()
             },

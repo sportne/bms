@@ -72,12 +72,14 @@ Current Java backend emission supports:
 - foundation scalar fields and message references
 - numeric slice (`bitField`, `float`, `scaledInt`)
 - collection slice (`array`, `vector`, `blobArray`, `blobVector`)
-- staged conditional slice (`varString`, `pad`)
+- conditional slice (`varString`, `pad`, `checksum`, `if`, nested `type`)
 
-Current Java backend still defers:
-- `checksum`
-- `if`
-- nested `type`
+Current Java backend conditional notes:
+- `checksum` currently supports `crc16` and `crc32`
+- checksum `range` must be `start..end` with non-negative integer indexes and `start <= end`
+- `if@test` currently supports `field == literal` and `field != literal` with numeric literals
+- members inside `if` and nested `type` are emitted as fields on the generated class in wire order
+- flattened member names must be unique after expansion or generation fails with diagnostics
 
 Current C++ backend emission is intentionally narrower:
 - foundation scalar fields and message references are generated

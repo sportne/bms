@@ -1,0 +1,483 @@
+package acme.telemetry.conditional.backend;
+
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Objects;
+import java.util.zip.CRC32;
+
+public final class ConditionalBackendFrame {
+  public short version;
+  public short payload;
+  public short modeValue;
+  public int nestedValue;
+  public short alwaysValue;
+
+  public byte[] encode() {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    writeUInt8(out, this.version);
+    writeUInt8(out, this.payload);
+    {
+      byte[] checksumSource = out.toByteArray();
+      validateChecksumRange(checksumSource.length, 0, 1, "crc16", "0..1");
+      int checksumValue = crc16(checksumSource, 0, 1);
+      writeUInt16(out, checksumValue, ByteOrder.BIG_ENDIAN);
+    }
+    if (((this.version & 0xFFL) == 1L)) {
+    writeUInt8(out, this.modeValue);
+    writeUInt16(out, this.nestedValue, ByteOrder.BIG_ENDIAN);
+    }
+    writeUInt8(out, this.alwaysValue);
+    return out.toByteArray();
+  }
+
+  /**
+   * Decodes a message instance from a byte array.
+   *
+   * @param bytes encoded message bytes
+   * @return decoded ConditionalBackendFrame value
+   */
+  public static ConditionalBackendFrame decode(byte[] bytes) {
+    Objects.requireNonNull(bytes, "bytes");
+    return decode(ByteBuffer.wrap(bytes));
+  }
+
+  /**
+   * Decodes a message instance from a byte buffer.
+   *
+   * @param input buffer positioned at the start of this message
+   * @return decoded ConditionalBackendFrame value
+   */
+  public static ConditionalBackendFrame decode(ByteBuffer input) {
+    Objects.requireNonNull(input, "input");
+    int messageStartPosition = input.position();
+    ConditionalBackendFrame value = new ConditionalBackendFrame();
+    value.version = readUInt8(input);
+    value.payload = readUInt8(input);
+    {
+      validateChecksumRange(input.limit() - messageStartPosition, 0, 1, "crc16", "0..1");
+      int expectedChecksum = readUInt16(input, ByteOrder.BIG_ENDIAN);
+      int actualChecksum = crc16(input, messageStartPosition, 0, 1);
+      if (expectedChecksum != actualChecksum) {
+        throw new IllegalArgumentException("Checksum mismatch for crc16 range 0..1. Expected " + expectedChecksum + ", computed " + actualChecksum + '.');
+      }
+    }
+    if (((value.version & 0xFFL) == 1L)) {
+    value.modeValue = readUInt8(input);
+    value.nestedValue = readUInt16(input, ByteOrder.BIG_ENDIAN);
+    }
+    value.alwaysValue = readUInt8(input);
+    return value;
+  }
+
+  /**
+   * Writes one signed 8-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   */
+  private static void writeInt8(ByteArrayOutputStream out, byte value) {
+    out.write(value);
+  }
+
+  /**
+   * Writes one unsigned 8-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   */
+  private static void writeUInt8(ByteArrayOutputStream out, short value) {
+    out.write(value & 0xFF);
+  }
+
+  /**
+   * Writes one signed 16-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeInt16(ByteArrayOutputStream out, short value, ByteOrder order) {
+    ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES).order(order);
+    buffer.putShort(value);
+    out.write(buffer.array(), 0, Short.BYTES);
+  }
+
+  /**
+   * Writes one unsigned 16-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeUInt16(ByteArrayOutputStream out, int value, ByteOrder order) {
+    writeInt16(out, (short) (value & 0xFFFF), order);
+  }
+
+  /**
+   * Writes one signed 32-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeInt32(ByteArrayOutputStream out, int value, ByteOrder order) {
+    ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES).order(order);
+    buffer.putInt(value);
+    out.write(buffer.array(), 0, Integer.BYTES);
+  }
+
+  /**
+   * Writes one unsigned 32-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeUInt32(ByteArrayOutputStream out, long value, ByteOrder order) {
+    writeInt32(out, (int) (value & 0xFFFFFFFFL), order);
+  }
+
+  /**
+   * Writes one signed 64-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
+    ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES).order(order);
+    buffer.putLong(value);
+    out.write(buffer.array(), 0, Long.BYTES);
+  }
+
+  /**
+   * Writes one unsigned 64-bit value.
+   *
+   * @param out destination byte stream
+   * @param value value to write
+   * @param order byte order to use
+   */
+  private static void writeUInt64(ByteArrayOutputStream out, long value, ByteOrder order) {
+    writeInt64(out, value, order);
+  }
+
+  /**
+   * Reads one signed 8-bit value.
+   *
+   * @param input source byte buffer
+   * @return decoded value
+   */
+  private static byte readInt8(ByteBuffer input) {
+    return input.get();
+  }
+
+  /**
+   * Reads one unsigned 8-bit value.
+   *
+   * @param input source byte buffer
+   * @return decoded value
+   */
+  private static short readUInt8(ByteBuffer input) {
+    return (short) (input.get() & 0xFF);
+  }
+
+  /**
+   * Reads one signed 16-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static short readInt16(ByteBuffer input, ByteOrder order) {
+    ByteBuffer slice = input.slice().order(order);
+    short value = slice.getShort();
+    input.position(input.position() + Short.BYTES);
+    return value;
+  }
+
+  /**
+   * Reads one unsigned 16-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static int readUInt16(ByteBuffer input, ByteOrder order) {
+    return Short.toUnsignedInt(readInt16(input, order));
+  }
+
+  /**
+   * Reads one signed 32-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static int readInt32(ByteBuffer input, ByteOrder order) {
+    ByteBuffer slice = input.slice().order(order);
+    int value = slice.getInt();
+    input.position(input.position() + Integer.BYTES);
+    return value;
+  }
+
+  /**
+   * Reads one unsigned 32-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static long readUInt32(ByteBuffer input, ByteOrder order) {
+    return Integer.toUnsignedLong(readInt32(input, order));
+  }
+
+  /**
+   * Reads one signed 64-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static long readInt64(ByteBuffer input, ByteOrder order) {
+    ByteBuffer slice = input.slice().order(order);
+    long value = slice.getLong();
+    input.position(input.position() + Long.BYTES);
+    return value;
+  }
+
+  /**
+   * Reads one unsigned 64-bit value.
+   *
+   * @param input source byte buffer
+   * @param order byte order to use
+   * @return decoded value
+   */
+  private static long readUInt64(ByteBuffer input, ByteOrder order) {
+    return readInt64(input, order);
+  }
+
+  /**
+   * Validates a collection count value and converts it to an int.
+   *
+   * @param countValue decoded count value as long
+   * @param fieldName field name shown in exception text
+   * @return validated count value as int
+   */
+  private static int requireCount(long countValue, String fieldName) {
+    if (countValue < 0 || countValue > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "Count field " + fieldName + " must be between 0 and Integer.MAX_VALUE.");
+    }
+    return (int) countValue;
+  }
+
+  /**
+   * Validates an unsigned-64 count and converts it to an int.
+   *
+   * @param countValue raw unsigned-64 count bits
+   * @param fieldName field name shown in exception text
+   * @return validated count value as int
+   */
+  private static int requireCountUnsignedLong(long countValue, String fieldName) {
+    if (Long.compareUnsigned(countValue, Integer.toUnsignedLong(Integer.MAX_VALUE)) > 0) {
+      throw new IllegalArgumentException(
+          "Unsigned count field "
+              + fieldName
+              + " must be <= Integer.MAX_VALUE. Received "
+              + Long.toUnsignedString(countValue)
+              + '.');
+    }
+    return (int) countValue;
+  }
+
+  /**
+   * Converts a scaled logical value to a signed integer raw value.
+   *
+   * @param logicalValue logical floating-point value
+   * @param scale scaling factor from the schema
+   * @param minInclusive signed minimum raw value
+   * @param maxInclusive signed maximum raw value
+   * @param fieldName field/member name for exception text
+   * @return rounded raw integer value
+   */
+  private static long scaleToSignedRaw(
+      double logicalValue,
+      double scale,
+      long minInclusive,
+      long maxInclusive,
+      String fieldName) {
+    if (!Double.isFinite(logicalValue)) {
+      throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+    }
+    if (scale == 0.0d || !Double.isFinite(scale)) {
+      throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+    }
+
+    double rawValue = logicalValue / scale;
+    if (!Double.isFinite(rawValue)) {
+      throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+    }
+
+    if (rawValue < minInclusive || rawValue > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Value " + logicalValue + " is outside raw range for " + fieldName + '.');
+    }
+
+    long rounded = Math.round(rawValue);
+    if (rounded < minInclusive || rounded > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside raw range.");
+    }
+    return rounded;
+  }
+
+  /**
+   * Converts a scaled logical value to an unsigned integer raw value.
+   *
+   * @param logicalValue logical floating-point value
+   * @param scale scaling factor from the schema
+   * @param maxInclusive unsigned maximum raw value that fits in a signed long
+   * @param fieldName field/member name for exception text
+   * @return rounded raw integer value
+   */
+  private static long scaleToUnsignedRaw(
+      double logicalValue, double scale, long maxInclusive, String fieldName) {
+    if (!Double.isFinite(logicalValue)) {
+      throw new IllegalArgumentException("Non-finite value for " + fieldName + '.');
+    }
+    if (scale == 0.0d || !Double.isFinite(scale)) {
+      throw new IllegalArgumentException("Invalid scale for " + fieldName + '.');
+    }
+
+    double rawValue = logicalValue / scale;
+    if (!Double.isFinite(rawValue)) {
+      throw new IllegalArgumentException("Scaled value is not finite for " + fieldName + '.');
+    }
+    if (rawValue < 0.0d || rawValue > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Value " + logicalValue + " is outside unsigned raw range for " + fieldName + '.');
+    }
+
+    long rounded = Math.round(rawValue);
+    if (rounded < 0 || rounded > maxInclusive) {
+      throw new IllegalArgumentException(
+          "Rounded value for " + fieldName + " is outside unsigned raw range.");
+    }
+    return rounded;
+  }
+  /**
+   * Validates one checksum byte range against available source length.
+   *
+   * @param availableLength available byte count in the source
+   * @param rangeStart first checksum byte index (inclusive)
+   * @param rangeEnd last checksum byte index (inclusive)
+   * @param algorithm checksum algorithm name
+   * @param rangeText original range text used in exception messages
+   */
+  private static void validateChecksumRange(
+      int availableLength,
+      int rangeStart,
+      int rangeEnd,
+      String algorithm,
+      String rangeText) {
+    if (rangeStart < 0 || rangeEnd < rangeStart || rangeEnd >= availableLength) {
+      throw new IllegalArgumentException(
+          "Checksum "
+              + algorithm
+              + " range "
+              + rangeText
+              + " is out of bounds for "
+              + availableLength
+              + " available bytes.");
+    }
+  }
+
+  /**
+   * Computes CRC-16/CCITT-FALSE over one byte-array range.
+   *
+   * @param source source bytes
+   * @param rangeStart first checksum byte index (inclusive)
+   * @param rangeEnd last checksum byte index (inclusive)
+   * @return computed 16-bit checksum value
+   */
+  private static int crc16(byte[] source, int rangeStart, int rangeEnd) {
+    int crc = 0xFFFF;
+    for (int index = rangeStart; index <= rangeEnd; index++) {
+      crc ^= (source[index] & 0xFF) << 8;
+      for (int bit = 0; bit < 8; bit++) {
+        if ((crc & 0x8000) != 0) {
+          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+        } else {
+          crc = (crc << 1) & 0xFFFF;
+        }
+      }
+    }
+    return crc & 0xFFFF;
+  }
+
+  /**
+   * Computes CRC-32 over one byte-array range.
+   *
+   * @param source source bytes
+   * @param rangeStart first checksum byte index (inclusive)
+   * @param rangeEnd last checksum byte index (inclusive)
+   * @return computed 32-bit checksum value
+   */
+  private static long crc32(byte[] source, int rangeStart, int rangeEnd) {
+    CRC32 crc32 = new CRC32();
+    for (int index = rangeStart; index <= rangeEnd; index++) {
+      crc32.update(source[index] & 0xFF);
+    }
+    return crc32.getValue();
+  }
+
+  /**
+   * Computes CRC-16/CCITT-FALSE over one byte-buffer range.
+   *
+   * @param input source byte buffer
+   * @param messageStartPosition start index of the decoded message
+   * @param rangeStart first checksum byte index (inclusive)
+   * @param rangeEnd last checksum byte index (inclusive)
+   * @return computed 16-bit checksum value
+   */
+  private static int crc16(
+      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+    int absoluteStart = messageStartPosition + rangeStart;
+    int absoluteEnd = messageStartPosition + rangeEnd;
+    int crc = 0xFFFF;
+    for (int index = absoluteStart; index <= absoluteEnd; index++) {
+      crc ^= (input.get(index) & 0xFF) << 8;
+      for (int bit = 0; bit < 8; bit++) {
+        if ((crc & 0x8000) != 0) {
+          crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+        } else {
+          crc = (crc << 1) & 0xFFFF;
+        }
+      }
+    }
+    return crc & 0xFFFF;
+  }
+
+  /**
+   * Computes CRC-32 over one byte-buffer range.
+   *
+   * @param input source byte buffer
+   * @param messageStartPosition start index of the decoded message
+   * @param rangeStart first checksum byte index (inclusive)
+   * @param rangeEnd last checksum byte index (inclusive)
+   * @return computed 32-bit checksum value
+   */
+  private static long crc32(
+      ByteBuffer input, int messageStartPosition, int rangeStart, int rangeEnd) {
+    int absoluteStart = messageStartPosition + rangeStart;
+    int absoluteEnd = messageStartPosition + rangeEnd;
+    CRC32 crc32 = new CRC32();
+    for (int index = absoluteStart; index <= absoluteEnd; index++) {
+      crc32.update(input.get(index) & 0xFF);
+    }
+    return crc32.getValue();
+  }
+}

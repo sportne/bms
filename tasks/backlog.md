@@ -4,7 +4,8 @@
 
 - [x] Implement Java backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
 - [x] Implement Java staged conditional backend emission for `varString` and `pad` (Milestone 04A).
-- [ ] Implement Java conditional backend emission for deferred members (`checksum`, `if`, nested `type`) (Milestone 04B).
+- [x] Implement Java conditional backend emission for deferred members (`checksum`, `if`, nested `type`) (Milestone 04B).
+- [ ] Expand Java conditional semantics beyond the current 04B subset (additional checksum algorithms and broader `if@test` operators).
 - [ ] Implement C++ backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
 - [ ] Implement C++ backend emission for conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`).
 - [ ] Expand end-to-end specs so at least one example covers each supported front-end construct.

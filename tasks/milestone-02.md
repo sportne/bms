@@ -30,6 +30,6 @@ This milestone builds the compiler front end in small, testable steps.
 - [x] Message member declaration order is preserved exactly in parsed and resolved models.
 - [x] Java/C++ generation is deterministic.
 - [x] Java generator emits deterministic code for numeric and collection backend slices.
-- [x] Java generator emits staged conditional support for `varString` and `pad`.
-- [x] Java generator fails with clear diagnostics for deferred conditional members (`checksum`, `if`, nested `type`).
+- [x] Java generator emits deterministic conditional code for `varString`, `pad`, `checksum`, `if`, and nested `type`.
+- [x] Java generator reports clear diagnostics for unsupported conditional combinations (for example unsupported `if@test` syntax or invalid checksum ranges).
 - [x] C++ generator still fails with clear diagnostics for non-foundation backend emission.

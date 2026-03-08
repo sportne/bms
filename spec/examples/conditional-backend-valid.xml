@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schema xmlns="http://example.com/binarymessage" namespace="acme.telemetry.conditional.backend">
+  <messageType name="ConditionalBackendFrame" comment="Covers checksum, if, and nested type Java backend support">
+    <field name="version" type="uint8" comment="Protocol version"/>
+    <field name="payload" type="uint8" comment="Payload selector"/>
+    <checksum alg="crc16" range="0..1" comment="Checksum for first two bytes"/>
+    <if test="version == 1">
+      <field name="modeValue" type="uint8" comment="Conditional mode"/>
+      <type name="ConditionalPayload" comment="Nested payload in conditional block">
+        <field name="nestedValue" type="uint16" comment="Nested payload value"/>
+      </type>
+    </if>
+    <type name="AlwaysPayload" comment="Always-present nested payload">
+      <field name="alwaysValue" type="uint8" comment="Always-present value"/>
+    </type>
+  </messageType>
+</schema>
