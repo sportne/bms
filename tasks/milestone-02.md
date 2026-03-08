@@ -36,3 +36,9 @@ This milestone builds the compiler front end in small, testable steps.
 - [x] Java generator and semantic validation report clear diagnostics for invalid conditional combinations (for example legacy `&&`/`||` text operators or invalid checksum ranges).
 - [x] Generated Java source is validated end-to-end by compiling generated classes and running encode/decode roundtrip tests.
 - [x] C++ generator still fails with clear diagnostics for non-foundation backend emission.
+
+## Next Milestones
+
+- Milestone 03: `tasks/milestone-03.md` (C++ numeric + collection parity)
+- Milestone 04: `tasks/milestone-04.md` (C++ conditional parity)
+- Milestone 05: `tasks/milestone-05.md` (runtime conformance + `0.1.0` release hardening)

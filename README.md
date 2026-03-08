@@ -95,6 +95,22 @@ Current C++ backend emission is intentionally narrower:
 
 The spec now requires `schema@namespace` and allows `messageType@namespace` override.
 
+## Release targets
+
+- `0.1.0` target: near parity with working Java and C++ backend behavior plus runtime conformance checks.
+- `1.0.0` target: hardening and stability (stronger compatibility guarantees and release process maturity).
+
+Roadmap and execution files:
+
+- [tasks/roadmap-0.1.0-to-1.0.md](tasks/roadmap-0.1.0-to-1.0.md)
+- [tasks/fixture-matrix-0.1.0.md](tasks/fixture-matrix-0.1.0.md)
+- [tasks/release-0.1.0-checklist.md](tasks/release-0.1.0-checklist.md)
+
+CLI scope lock for `0.1.0`:
+
+- CLI commands remain `validate` and `generate` with `--java` and `--cpp`.
+- No new CLI command is required for `0.1.0`.
+
 ## Namespace behavior (important)
 
 - `schema@namespace` is required.

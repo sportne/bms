@@ -2,22 +2,19 @@
 
 ## P0
 
-- [x] Implement Java backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
-- [x] Implement Java staged conditional backend emission for `varString` and `pad` (Milestone 04A).
-- [x] Implement Java conditional backend emission for deferred members (`checksum`, `if`, nested `type`) (Milestone 04B).
-- [x] Expand Java conditional semantics with additional checksum algorithms (`crc64`, `sha256`) and broader `if@test` operators (`<`, `<=`, `>`, `>=`).
-- [x] Add Java runtime end-to-end tests that compile generated code and verify encode/decode roundtrip behavior.
-- [ ] Implement C++ backend emission for numeric and collection members (`bitField`, `float`, `scaledInt`, `array`, `vector`, `blobArray`, `blobVector`).
-- [ ] Implement C++ backend emission for conditional members (`varString`, `pad`, `checksum`, `if`, nested `type`).
-- [x] Expand end-to-end specs so at least one example covers each supported front-end construct.
-- [x] Expand Java `if@test` support to compound boolean expressions (`and`, `or`) with deterministic precedence rules and explicit `&&`/`||` rejection diagnostics.
+- [x] Lock Java baseline with deterministic generation and runtime end-to-end validation.
+- [x] Freeze `0.1.0` fixture matrix in `tasks/fixture-matrix-0.1.0.md`.
+- [x] Lock roadmap milestones and release checklist for `0.1.0` (`tasks/milestone-03.md` to `tasks/milestone-05.md` and `tasks/release-0.1.0-checklist.md`).
+- [ ] Complete Milestone 03: C++ numeric + collection parity.
+- [ ] Complete Milestone 04: C++ conditional parity.
+- [ ] Complete Milestone 05: runtime conformance harness and `0.1.0` release hardening.
 
 ## P1
 
-- [ ] Add golden tests for new backend numeric code generation outputs.
 - [ ] Improve diagnostics with richer source location details (line/column where possible).
 - [ ] Improve CLI UX for multi-error summaries and next-step hints.
 - [ ] Add optional formatting pass for generated Java and C++ output.
+- [ ] Define `1.0.0` compatibility contract (freeze policy for XSD + CLI).
 
 ## P2
 
