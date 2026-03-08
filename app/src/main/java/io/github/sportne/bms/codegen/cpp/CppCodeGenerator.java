@@ -21,9 +21,6 @@ import io.github.sportne.bms.model.resolved.PrimitiveType;
 import io.github.sportne.bms.model.resolved.PrimitiveTypeRef;
 import io.github.sportne.bms.model.resolved.ResolvedArray;
 import io.github.sportne.bms.model.resolved.ResolvedBitField;
-import io.github.sportne.bms.model.resolved.ResolvedBitFlag;
-import io.github.sportne.bms.model.resolved.ResolvedBitSegment;
-import io.github.sportne.bms.model.resolved.ResolvedBitVariant;
 import io.github.sportne.bms.model.resolved.ResolvedBlobArray;
 import io.github.sportne.bms.model.resolved.ResolvedBlobVector;
 import io.github.sportne.bms.model.resolved.ResolvedChecksum;
@@ -59,9 +56,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeSet;
 
 /**
@@ -543,10 +538,7 @@ public final class CppCodeGenerator {
     builder.append("#include <vector>\n");
 
     TreeSet<String> includePaths = new TreeSet<>();
-    for (ResolvedMessageMember member : messageType.members()) {
-      collectMessageIncludesForMember(
-          member, messageType.effectiveNamespace(), generationContext, includePaths);
-    }
+    CppHelperEmitter.collectMessageIncludes(includePaths, messageType, generationContext);
     for (String includePath : includePaths) {
       if (!includePath.equals(headerIncludePath(messageType))) {
         builder.append("#include \"").append(includePath).append("\"\n");
@@ -591,89 +583,6 @@ public final class CppCodeGenerator {
   }
 
   /**
-   * Collects cross-message includes needed for one resolved member.
-   *
-   * @param member member to inspect
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   * @param includePaths destination set of include paths
-   */
-  private static void collectMessageIncludesForMember(
-      ResolvedMessageMember member,
-      String currentNamespace,
-      GenerationContext generationContext,
-      Set<String> includePaths) {
-    if (member instanceof ResolvedField resolvedField) {
-      collectMessageIncludesForTypeRef(
-          resolvedField.typeRef(), currentNamespace, generationContext, includePaths);
-      return;
-    }
-    if (member instanceof ResolvedArray resolvedArray) {
-      collectMessageIncludesForTypeRef(
-          resolvedArray.elementTypeRef(), currentNamespace, generationContext, includePaths);
-      return;
-    }
-    if (member instanceof ResolvedVector resolvedVector) {
-      collectMessageIncludesForTypeRef(
-          resolvedVector.elementTypeRef(), currentNamespace, generationContext, includePaths);
-      return;
-    }
-    if (member instanceof ResolvedIfBlock resolvedIfBlock) {
-      for (ResolvedMessageMember nestedMember : resolvedIfBlock.members()) {
-        collectMessageIncludesForMember(
-            nestedMember, currentNamespace, generationContext, includePaths);
-      }
-      return;
-    }
-    if (member instanceof ResolvedMessageType resolvedNestedType) {
-      for (ResolvedMessageMember nestedMember : resolvedNestedType.members()) {
-        collectMessageIncludesForMember(
-            nestedMember, currentNamespace, generationContext, includePaths);
-      }
-    }
-  }
-
-  /**
-   * Collects cross-message includes needed for one resolved type reference.
-   *
-   * @param typeRef type reference to inspect
-   * @param currentNamespace namespace of the generated message
-   * @param generationContext reusable lookup maps
-   * @param includePaths destination set of include paths
-   */
-  private static void collectMessageIncludesForTypeRef(
-      ResolvedTypeRef typeRef,
-      String currentNamespace,
-      GenerationContext generationContext,
-      Set<String> includePaths) {
-    if (typeRef instanceof MessageTypeRef messageTypeRef) {
-      ResolvedMessageType referenced =
-          generationContext.messageTypeByName().get(messageTypeRef.messageTypeName());
-      if (referenced != null && !referenced.effectiveNamespace().equals(currentNamespace)) {
-        includePaths.add(headerIncludePath(referenced));
-      }
-      return;
-    }
-    if (typeRef instanceof ArrayTypeRef arrayTypeRef) {
-      ResolvedArray resolvedArray =
-          generationContext.reusableArrayByName().get(arrayTypeRef.arrayTypeName());
-      if (resolvedArray != null) {
-        collectMessageIncludesForTypeRef(
-            resolvedArray.elementTypeRef(), currentNamespace, generationContext, includePaths);
-      }
-      return;
-    }
-    if (typeRef instanceof VectorTypeRef vectorTypeRef) {
-      ResolvedVector resolvedVector =
-          generationContext.reusableVectorByName().get(vectorTypeRef.vectorTypeName());
-      if (resolvedVector != null) {
-        collectMessageIncludesForTypeRef(
-            resolvedVector.elementTypeRef(), currentNamespace, generationContext, includePaths);
-      }
-    }
-  }
-
-  /**
    * Appends field declarations for all members that materialize as data fields.
    *
    * @param builder destination header builder
@@ -706,53 +615,7 @@ public final class CppCodeGenerator {
    */
   private static void appendBitFieldHelperDeclarations(
       StringBuilder builder, ResolvedMessageType messageType) {
-    for (ResolvedMessageMember member : messageType.members()) {
-      if (!(member instanceof ResolvedBitField resolvedBitField)) {
-        continue;
-      }
-      String bitFieldPascal = toPascalCase(resolvedBitField.name());
-      for (ResolvedBitFlag resolvedBitFlag : resolvedBitField.flags()) {
-        String flagPascal = toPascalCase(resolvedBitFlag.name());
-        builder
-            .append("  bool get")
-            .append(bitFieldPascal)
-            .append(flagPascal)
-            .append("() const;\n");
-        builder
-            .append("  void set")
-            .append(bitFieldPascal)
-            .append(flagPascal)
-            .append("(bool value);\n");
-      }
-      for (ResolvedBitSegment resolvedBitSegment : resolvedBitField.segments()) {
-        String segmentPascal = toPascalCase(resolvedBitSegment.name());
-        builder
-            .append("  std::uint64_t get")
-            .append(bitFieldPascal)
-            .append(segmentPascal)
-            .append("() const;\n");
-        builder
-            .append("  void set")
-            .append(bitFieldPascal)
-            .append(segmentPascal)
-            .append("(std::uint64_t value);\n");
-        for (ResolvedBitVariant resolvedBitVariant : resolvedBitSegment.variants()) {
-          builder
-              .append("  static constexpr std::uint64_t ")
-              .append(
-                  toUpperSnakeCase(
-                      resolvedBitField.name()
-                          + "_"
-                          + resolvedBitSegment.name()
-                          + "_"
-                          + resolvedBitVariant.name()))
-              .append(" = ")
-              .append(cppUnsignedLiteral(resolvedBitVariant.value()))
-              .append(";\n");
-        }
-      }
-      builder.append('\n');
-    }
+    CppHelperEmitter.appendBitFieldHelperDeclarations(builder, messageType);
   }
 
   /**
@@ -793,109 +656,7 @@ public final class CppCodeGenerator {
    */
   private static void appendBitFieldHelperDefinitions(
       StringBuilder builder, ResolvedMessageType messageType) {
-    for (ResolvedMessageMember member : messageType.members()) {
-      if (!(member instanceof ResolvedBitField resolvedBitField)) {
-        continue;
-      }
-      PrimitiveType storageType = bitFieldStoragePrimitive(resolvedBitField.size());
-      String cppStorageType = storageType.cppTypeName();
-      String bitFieldName = resolvedBitField.name();
-      String bitFieldPascal = toPascalCase(bitFieldName);
-      for (ResolvedBitFlag resolvedBitFlag : resolvedBitField.flags()) {
-        String flagPascal = toPascalCase(resolvedBitFlag.name());
-        long mask = 1L << resolvedBitFlag.position();
-        builder
-            .append("bool ")
-            .append(messageType.name())
-            .append("::get")
-            .append(bitFieldPascal)
-            .append(flagPascal)
-            .append("() const {\n")
-            .append("  return (static_cast<std::uint64_t>(")
-            .append(bitFieldName)
-            .append(") & ")
-            .append(mask)
-            .append("ULL) != 0ULL;\n")
-            .append("}\n\n")
-            .append("void ")
-            .append(messageType.name())
-            .append("::set")
-            .append(bitFieldPascal)
-            .append(flagPascal)
-            .append("(bool value) {\n")
-            .append("  std::uint64_t raw = static_cast<std::uint64_t>(")
-            .append(bitFieldName)
-            .append(");\n")
-            .append("  if (value) {\n")
-            .append("    raw |= ")
-            .append(mask)
-            .append("ULL;\n")
-            .append("  } else {\n")
-            .append("    raw &= ~")
-            .append(mask)
-            .append("ULL;\n")
-            .append("  }\n")
-            .append("  ")
-            .append(bitFieldName)
-            .append(" = static_cast<")
-            .append(cppStorageType)
-            .append(">(raw);\n")
-            .append("}\n\n");
-      }
-
-      for (ResolvedBitSegment resolvedBitSegment : resolvedBitField.segments()) {
-        String segmentPascal = toPascalCase(resolvedBitSegment.name());
-        int width = resolvedBitSegment.toBit() - resolvedBitSegment.fromBit() + 1;
-        String maskLiteral = segmentMaskLiteral(width);
-        String shiftedMaskLiteral = shiftedSegmentMaskLiteral(width, resolvedBitSegment.fromBit());
-        builder
-            .append("std::uint64_t ")
-            .append(messageType.name())
-            .append("::get")
-            .append(bitFieldPascal)
-            .append(segmentPascal)
-            .append("() const {\n")
-            .append("  return (static_cast<std::uint64_t>(")
-            .append(bitFieldName)
-            .append(") >> ")
-            .append(resolvedBitSegment.fromBit())
-            .append(") & ")
-            .append(maskLiteral)
-            .append(";\n")
-            .append("}\n\n")
-            .append("void ")
-            .append(messageType.name())
-            .append("::set")
-            .append(bitFieldPascal)
-            .append(segmentPascal)
-            .append("(std::uint64_t value) {\n")
-            .append("  if (value > ")
-            .append(maskLiteral)
-            .append(") {\n")
-            .append("    throw std::invalid_argument(\"")
-            .append(bitFieldName)
-            .append('.')
-            .append(resolvedBitSegment.name())
-            .append(" is out of range for its bit segment.\");\n")
-            .append("  }\n")
-            .append("  std::uint64_t raw = static_cast<std::uint64_t>(")
-            .append(bitFieldName)
-            .append(");\n")
-            .append("  raw = (raw & ~")
-            .append(shiftedMaskLiteral)
-            .append(") | ((value & ")
-            .append(maskLiteral)
-            .append(") << ")
-            .append(resolvedBitSegment.fromBit())
-            .append(");\n")
-            .append("  ")
-            .append(bitFieldName)
-            .append(" = static_cast<")
-            .append(cppStorageType)
-            .append(">(raw);\n")
-            .append("}\n\n");
-      }
-    }
+    CppHelperEmitter.appendBitFieldHelperDefinitions(builder, messageType);
   }
 
   /**
@@ -3192,16 +2953,6 @@ public final class CppCodeGenerator {
   }
 
   /**
-   * Builds a C++ unsigned literal token for a 64-bit constant.
-   *
-   * @param numericLiteral literal value
-   * @return C++ token with `ULL` suffix
-   */
-  private static String cppUnsignedLiteral(BigInteger numericLiteral) {
-    return numericLiteral.toString() + "ULL";
-  }
-
-  /**
    * Builds the numeric token text used inside generated C++ casts.
    *
    * @param primitiveType primitive target type
@@ -3217,34 +2968,6 @@ public final class CppCodeGenerator {
       return numericLiteral.toString() + "ULL";
     }
     return numericLiteral.toString() + "LL";
-  }
-
-  /**
-   * Builds a segment mask literal for one bit width.
-   *
-   * @param width segment width in bits
-   * @return C++ `ULL` literal mask
-   */
-  private static String segmentMaskLiteral(int width) {
-    if (width >= 64) {
-      return "0xFFFFFFFFFFFFFFFFULL";
-    }
-    return BigInteger.ONE.shiftLeft(width).subtract(BigInteger.ONE).toString() + "ULL";
-  }
-
-  /**
-   * Builds a shifted segment mask literal for one segment position.
-   *
-   * @param width segment width in bits
-   * @param fromBit segment start bit
-   * @return shifted C++ `ULL` literal mask
-   */
-  private static String shiftedSegmentMaskLiteral(int width, int fromBit) {
-    if (width >= 64 && fromBit == 0) {
-      return "0xFFFFFFFFFFFFFFFFULL";
-    }
-    return BigInteger.ONE.shiftLeft(width).subtract(BigInteger.ONE).shiftLeft(fromBit).toString()
-        + "ULL";
   }
 
   /**
@@ -3290,17 +3013,6 @@ public final class CppCodeGenerator {
       }
     }
     return builder.toString();
-  }
-
-  /**
-   * Converts a value to upper snake case for constant names.
-   *
-   * @param value input text
-   * @return upper-snake output
-   */
-  private static String toUpperSnakeCase(String value) {
-    String normalized = value.replaceAll("[^A-Za-z0-9]+", "_");
-    return normalized.toUpperCase(Locale.ROOT);
   }
 
   /**
