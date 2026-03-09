@@ -28,3 +28,6 @@ build
 
 # Local artifacts from generated-C++ compile/runtime tests
 .tmp/cpp-test-artifacts/
+
+# a folder to contain files we want to use but not include in the repo
+ignore

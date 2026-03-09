@@ -65,6 +65,19 @@ jobs:
       - name: Verify native-image
         run: native-image --version
 
+      - name: Install C++ compiler and analyzers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ clang-tidy cppcheck
+
+      - name: Verify C++ compiler
+        run: g++ --version
+
+      - name: Verify C++ analyzers
+        run: |
+          clang-tidy --version
+          cppcheck --version
+
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 

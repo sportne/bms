@@ -1,6 +1,7 @@
 package io.github.sportne.bms.codegen.cpp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -86,6 +87,14 @@ class CppGeneratedStaticAnalysisTest {
     assertFixturePassesStaticAnalysis("specs/checksum-sha256-valid.xml", "checksum-sha256");
   }
 
+  /** Contract: probing one missing executable returns unavailable instead of failing the test. */
+  @Test
+  void missingExecutableIsReportedAsUnavailable() {
+    assertFalse(
+        hasExecutable("bms-executable-probe-9f3d0f56b3f44bfa93f53733cbf5582f"),
+        "Expected missing executable probe to report unavailable.");
+  }
+
   /**
    * Generates one fixture and runs clang-tidy/cppcheck over generated C++ output.
    *
@@ -155,8 +164,12 @@ class CppGeneratedStaticAnalysisTest {
    * @return {@code true} when the executable is available
    */
   private static boolean hasExecutable(String executable) {
-    CommandResult result = runCommand(List.of(executable, "--version"), Path.of("."));
-    return result.exitCode() == 0;
+    try {
+      CommandResult result = runCommand(List.of(executable, "--version"), Path.of("."));
+      return result.exitCode() == 0;
+    } catch (IllegalStateException exception) {
+      return false;
+    }
   }
 
   /**
